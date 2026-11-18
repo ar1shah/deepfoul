@@ -1,0 +1,49 @@
+[project]
+name = "deepfoul"
+version = "0.1.0"
+description = "Computer vision that flags eye pokes and low blows in recorded MMA footage for human review."
+authors = [{ name = "Ari Shah" }]
+license = "Apache-2.0"
+readme = "README.md"
+requires-python = "==3.11.*"
+dependencies = [
+    "rtmlib",
+    "opencv-contrib-python",
+    "supervision",
+    "scenedetect",
+    "pandas",
+    "pyarrow",
+    "pyyaml",
+    "typer",
+    # GPU inference on the Windows PCs (CUDA + cuDNN come from pip wheels), CPU on the Mac.
+    "onnxruntime-gpu[cuda,cudnn]; sys_platform != 'darwin'",
+    "onnxruntime; sys_platform == 'darwin'",
+]
+
+[project.scripts]
+deepfoul = "deepfoul.cli:app"
+
+[dependency-groups]
+dev = ["pytest"]
+
+[tool.uv]
+# rtmlib depends on CPU `onnxruntime`, which shares a package folder with
+# `onnxruntime-gpu` and would silently disable CUDA. Only allow it on macOS.
+override-dependencies = [
+    "onnxruntime; sys_platform == 'darwin'",
+    # rtmlib pulls opencv-contrib-python, supervision pulls opencv-python; both own `cv2`.
+    # Keep only contrib (a superset).
+    "opencv-python; python_version < '0'",
+]
+# Some NVIDIA wheel releases skip Windows; force versions that install on our machines.
+required-environments = [
+    "sys_platform == 'win32' and platform_machine == 'AMD64'",
+    "sys_platform == 'darwin' and platform_machine == 'arm64'",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["uv_build>=0.13.9,<0.14.0"]
+build-backend = "uv_build"
