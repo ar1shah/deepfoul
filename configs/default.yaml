@@ -1,0 +1,36 @@
+# DeepFoul default config. Paths are relative to the repo root.
+
+paths:
+  raw: data/raw            # full downloaded videos (<fight_id>.mp4)
+  clips: data/clips
+  keypoints: data/keypoints
+  cache: data/cache
+  outputs: outputs
+  labels: labels
+
+# Device: auto | cuda | cpu. "auto" uses CUDA when onnxruntime-gpu and an NVIDIA GPU are available.
+device: auto
+
+# Machine profile, picked from detected VRAM (override with `profile: large|small|cpu`).
+profile: auto
+profiles:
+  large:   # RTX 4090 (24 GB)
+    min_vram_gb: 16
+    pose_mode: performance   # rtmlib: RTMW-x 384x288 + YOLOX-m
+    batch_size: 16
+  small:   # RTX 2080 (8 GB)
+    min_vram_gb: 6
+    pose_mode: performance
+    batch_size: 4
+  cpu:     # Mac / no GPU: quick tests on short clips only
+    min_vram_gb: 0
+    pose_mode: lightweight   # rtmlib: RTMW-l 256x192 + YOLOX-tiny
+    batch_size: 1
+
+# Placeholders, tuned in later sections.
+lookahead_s: 2.0          # max future context for any decision at time t
+match_tolerance_s: 1.0    # eval: predicted flag matches a label within +-1 s
+kpt_conf_min: 0.3         # keypoints below this are masked
+
+fetch:
+  max_height: 1080
