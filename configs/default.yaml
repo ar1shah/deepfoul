@@ -34,3 +34,13 @@ kpt_conf_min: 0.3         # keypoints below this are masked
 
 fetch:
   max_height: 1080
+
+# Shot (camera-cut) detection, 1.1. Changing these makes `extract --shots` re-run cached fights.
+shots:
+  detector: adaptive        # PySceneDetect AdaptiveDetector
+  adaptive_threshold: 3.0   # score ratio vs rolling average needed for a cut
+  min_content_val: 15.0     # minimum raw content change for a cut
+  min_scene_len_s: 0.5      # converted to frames with each video's own fps
+
+previews:
+  golden_pad_s: 10          # golden candidate clips: live time +- this many seconds
