@@ -140,6 +140,22 @@ def fetch(
         raise typer.Exit(1)
 
 
+@app.command("fetch-check")
+def fetch_check(
+    csv_path: Path = typer.Option(None, "--csv", help="Fights CSV (default: labels/fights.csv)."),
+) -> None:
+    """ffprobe every downloaded video, flag problems, write contact sheets + outputs/fetch_check/report.md."""
+    from deepfoul.io.fetch import read_fights
+    from deepfoul.io.probe import check_all
+
+    cfg = load_config()
+    rows = read_fights(csv_path or cfg["paths"]["labels"] / "fights.csv")
+    out_dir = cfg["paths"]["outputs"] / "fetch_check"
+    for r in check_all(rows, cfg["paths"]["raw"], out_dir):
+        typer.echo(f"{r['fight_id']:<36} {r['status']:<10} {'; '.join(r['flags']) or 'ok'}")
+    typer.echo(f"report: {out_dir / 'report.md'}")
+
+
 @app.command("pose-check")
 def pose_check(
     image: Path = typer.Argument(..., exists=True, dir_okay=False),
