@@ -6,6 +6,7 @@ Claude Code updates this file at the end of every ROADMAP section. Newest entrie
 | Phase | Section | Status |
 |---|---|---|
 | 0 | 0.1 Repo and environment | Done (RTX 2080) |
+| 0 | 0.2 Starter fights | Done (15/15 downloaded) |
 | 1 | 1.1 Video IO and shot detection | Not started |
 | 1 | 1.2 Detection and tracking | Not started |
 | 1 | 1.3 Identity: ref filter and red/blue | Not started |
@@ -30,12 +31,17 @@ Claude Code updates this file at the end of every ROADMAP section. Newest entrie
 ## Key numbers
 - Pipeline speed (fps on RTX 2080): -
 - Labeled positives: eye_poke - / low_blow - / open_hand -
-- Fights: train - / val - / test -
+- Fights: train 9 / val 4 / test 2 (8 foul, 5 clean, 2 test). Known fouls: 16 (`labels/notes/known_fouls.csv`)
 - Best val metrics: -
 - Test metrics: -
 
 ## Open issues
 - openmmlab's model server throttles to ~100 KB/s per connection. On a new machine, pre-download the two model zips from rtmlib's Hugging Face mirror (see the 0.1 log entry).
+- **6 unofficial uploads** (Aspinall-Gane, Battle-Loosa, Garbrandt-Long, Holland-Malott, Munhoz-O'Malley, Edwards-Muhammad). Accepted for now; ask Cowork for official replacements in a data round. They can vanish or be re-uploaded with a different cut, which would break every timestamp for that fight. If a URL is swapped, the fight's window and known fouls have to be re-timed.
+- Edwards-Muhammad is 480p (under the 720p bar). Kept for train; drop it if pose is poor in 1.4.
+- Garbrandt-Long is a Russian broadcast at 1694x1080, 60 fps (probably cropped and frame-interpolated). Munhoz-O'Malley is 50 fps.
+- Jandiroba-Dern has a sponsor overlay (bottom right) burned into the official UFC upload.
+- No Gane-Hokit (UFC 334) row yet; add it once a video exists. No similar-shorts fight confirmed yet.
 
 ## Switching machines (later, not now)
 All work is on the RTX 2080 PC for now. When Ari moves to the 4090 PC (or any new Windows PC):
@@ -48,6 +54,39 @@ All work is on the RTX 2080 PC for now. When Ari moves to the 4090 PC (or any ne
 7. `deepfoul fetch` to rebuild `data/raw/` from `labels/fights.csv`.
 
 ## Log
+
+### 2026-11-19 · Section 0.2 · Starter fights
+**Built:**
+- `labels/fights.csv`: 15 starter fights with `action_start_s` / `action_end_s` (from Ari's windows, in seconds). The `fights_starter.*` files are removed.
+- `labels/notes/starter_fights.md`: Ari's known fouls (live and replay times), corners, sources, and the dropped fights with reasons.
+- `labels/notes/known_fouls.csv`: the 16 known fouls in seconds (`fight_id, live_s, replay_s, foul_type, offender, victim, ref_paused, visibility, notes`), for 2.2 and the golden set. 2 of them are in test fights, so filter by split.
+- `src/deepfoul/io/fights.py`: `FIGHT_COLS`, `parse_mmss`, `window`, `validate_fights` (fight / `comp_<name>_<nn>` / `clip_<fight id>` ids, splits, dates, YouTube URLs, windows). It's meant for reuse by `ingest` in 2.3.
+- `deepfoul fetch-check` (`src/deepfoul/io/probe.py`): ffprobe stats and flags, a contact sheet per fight at 10/50/90% of the fight window, and `outputs/fetch_check/report.md` with a summary per bucket.
+- 33 new tests (43 total), including: the committed fights.csv is valid, and every known foul is inside its window.
+
+**Decisions:**
+- I validated the CSV while planning (yt-dlp metadata) and asked Ari then, so there was no mid-session pause. Ari accepted the 6 unofficial uploads (flagged for replacement later), kept the 480p Edwards-Muhammad, and skipped a Gane-Hokit placeholder.
+- The duration flag only applies to rows without a window. With a window, a video is flagged only if it's shorter than `action_end_s` (Jones-Gane is short on purpose).
+- Contact sheets use the fight window, not the whole video, so they show fighters instead of walkouts.
+- `known_fouls.csv` got an extra `notes` column for things like "clear in replay at 09:28". Gaethje-Holloway poke 1 ("clearer in replay") is marked `hard_live`.
+
+**Verified:**
+- `deepfoul fetch`: 13 downloaded on the first pass. Garbrandt-Long and Holland-Malott hit a YouTube HTTP 403 and succeeded on one retry with `--only`. **15/15 downloaded.**
+- `deepfoul fetch-check`: no length or frame rate problems. Flags: 6 unofficial uploads, and Edwards-Muhammad under 720p. Per bucket: test 2/2, foul 8/8, clean 5/5 downloaded.
+- I looked at 6 contact sheets (Garbrandt, Edwards, Jandiroba-Dern, Munhoz-O'Malley, Holland-Malott, Aspinall-Gane): right fighters, full broadcast.
+- `git status` showed nothing under `data/` or `outputs/`. `uv run pytest`: 43 passed.
+
+**Golden set:** n/a.
+
+**Known issues:**
+- See Open issues (unofficial uploads, 480p, Russian broadcast, sponsor overlay).
+- The windows include between-round segments, e.g. Munhoz-O'Malley 08:13 is a split-screen of the corners. These are handled in 4.2.
+- **For 1.3:** in Holland-Malott, red-corner Holland wears **black** and blue-corner Malott wears **red** (the broadcast "trunk colors" graphic shows it). Shorts color ≠ corner color.
+- Cosmetic: the timestamp on a contact sheet can overlap a channel watermark in the top left.
+
+**Next:**
+- Ari: open `outputs/fetch_check/report.md` and check every contact sheet (5 s each). The fight windows are already in `fights.csv`, so step 4 of the 0.2 "You do" and the "Fight windows" line in the 1.1 kickoff aren't needed.
+- Then section 1.1 (video IO and shot detection).
 
 ### 2026-11-18 · Section 0.1 · Repo and environment
 **Built:**
