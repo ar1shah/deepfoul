@@ -1,22 +1,36 @@
 # DeepFoul Roadmap
 
-Each section is sized for one Claude Code session. Every section has:
-- **Build**: everything Claude Code does in that session. That includes code, plus scripted chores like installs, downloads, batch runs, renders and review reels. If a chore can run from the repo, it belongs here.
-- **Done when**: the concrete check before moving on.
-- **Ari**: work outside the Claude Code session, split into:
-  - **Claude chat / Cowork**: research and writing done separately from Claude Code (finding fights and URLs, drafting posts and emails), plus check-ins on plans and results. Results go into the repo (Cowork can write them directly) or get pasted into Claude Code.
-  - **You do**: things only Ari can do: anything needing his accounts or logins, judgment calls, and **all labeling** (ground truth must come from a human, never from Claude).
+## How every section works
 
-Ari's data work runs in parallel with the code. Start collecting footage on day 1; don't wait for the tools.
+Work is sequential: Claude Code finishes its part, then Ari does his. Nothing runs at the same time.
+
+**The loop for every section:**
+1. **Start a new Claude Code session** (plan mode) in `C:\Users\AriSh\Documents\projects\deepfoul` and paste the section's **Kickoff prompt**.
+2. **Send the plan to Claude chat** (the DeepFoul project). Apply any tweaks, then approve.
+3. **Claude Code builds and verifies** everything under **Claude Code does**, updates `PROGRESS.md`, commits and pushes. Some sections have a **pause point** where Claude Code stops mid-session and waits for a reply from Ari.
+4. **Ari does the steps under You do**, in order.
+5. If the section has a **Send to chat** item, send it before starting the next section.
+
+**Who does what:**
+- **Claude Code**: all code, installs, downloads, batch runs, renders, reports, edits to every CSV except `events.csv` and commits. If something can run from the repo, Claude Code does it.
+- **Claude chat / Cowork**: web research (finding fights and URLs) and writing (posts, emails), plus reviewing plans and results.
+- **Ari**: logins, approvals, watching footage, judgment calls and **all labeling**. Ground truth must come from a human, never from Claude.
+
+**Rules of thumb for Ari:**
+- **Never hand-edit CSVs** (except reviewing the Cowork draft in 0.2). Give the information to Claude Code in the next kickoff prompt, or as a reply at a pause point, and it writes the file. The labeling app writes `events.csv`.
+- **Watch footage in VLC** (or any player that shows exact times). When you note a moment, write it as `fight_id mm:ss` (e.g. `ufc276_omalley_munhoz 03:41`).
+- **The standard kickoff prompt** is: `Read CLAUDE.md, ROADMAP.md and PROGRESS.md. Plan section X.Y only. Wait for my approval before writing code.` Sections add extra lines when needed.
 
 ---
 
-## Footage guide (read this first)
+## Footage guide
 
 ### Three kinds of footage
-1. **Full fights**: the main source. Used for tracking, mining stoppages, negatives and most positives. Every full fight gets a row in `labels/fights.csv`.
-2. **Foul compilations**: YouTube "eye poke / low blow compilation" videos. Only used to top up positives. Each gets a `fights.csv` row too (e.g. `comp_eyepokes_01`, `split=train`).
+1. **Full fights**: the main source. Used for tracking, mining stoppages, negatives and most positives.
+2. **Foul compilations**: YouTube "eye poke / low blow compilation" videos. Only used to top up positives (e.g. `comp_eyepokes_01`, `split=train`).
 3. **Test fights**: Ciryl Gane's fights. Held out, never trained or tuned on.
+
+Every video gets one row in `labels/fights.csv`. `deepfoul fetch` downloads every row's `source_url` to `data/raw/<fight_id>.mp4` and skips files that already exist.
 
 ### Quality bar for any video
 - Full fight at **normal speed**, 720p minimum (1080p preferred)
@@ -25,372 +39,519 @@ Ari's data work runs in parallel with the code. Start collecting footage on day 
 - Mostly UFC broadcasts from 2022 onward, so the cameras and graphics look consistent
 - Footage stays in `data/raw/`, private, never redistributed
 
-### Starter list for Phase 0 (15 to 20 full fights)
+### Videos with no free official upload
+Recent fights (like Gane vs Hokit at UFC 334) often aren't on YouTube for free yet. Options, in order:
+1. Leave `source_url` blank and keep the row. Add the URL once the UFC posts it.
+2. If you get a legit copy another way, save it as `data/raw/<fight_id>.mp4` yourself. `fetch` skips files that are already there, so it just uses yours.
+
+Test fights are only needed in Phase 6, so a missing test video doesn't block anything before then.
+
+### Starter list (15 to 20 full fights)
 | Bucket | How many | What | Split |
 |---|---|---|---|
 | Test | 2 to 3 | Aspinall vs Gane (UFC 321), Gane vs Hokit (UFC 334), plus any other recent Gane fight with fouls | `test` |
-| Foul fights | 8 to 10 | Fights where an eye poke or low blow visibly paused or ended the action. Roughly half eye pokes, half low blows. Known eye poke examples: Edwards vs Muhammad 1 (2021), O'Malley vs Munhoz (UFC 276), Weidman vs Bruno Silva. | 2 to 3 of these `val`, rest `train` |
+| Foul fights | 8 to 10 | An eye poke or low blow visibly paused or ended the action. Roughly half eye pokes, half low blows. | 2 to 3 `val`, rest `train` |
 | Clean fights | 5 to 7 | No notable fouls, mostly stand-up striking | 1 `val`, rest `train` |
 
-**Variety rules for the starter list:**
-- At least 2 women's fights (sports bras matter for the ref filter)
-- At least 1 fight where both fighters wear similar or dark shorts
-- A mix of striking-heavy and grappling-heavy fights
-- A mix of weight classes (body size changes the geometry)
+Variety: at least 2 women's fights, at least 1 fight with similar or dark shorts, a mix of striking-heavy and grappling-heavy fights, a mix of weight classes.
 
 ### Growth targets (Phases 2 to 5)
 - 30+ train fights, 5 to 6 val fights. The val fights must contain at least 8 real fouls between them, or the val metrics mean nothing.
-- 150+ eye pokes, 150+ low blows, 200+ hard negatives (details in 2.3).
-- **Compilation leakage rule:** compilations often include famous pokes, including Gane's. Any compilation segment from a test fight gets skipped during labeling.
+- 150+ eye pokes, 150+ low blows, 200+ hard negatives.
+- **Compilation leakage rule:** compilations often include famous pokes, including Gane's. Skip any compilation segment from a test fight while labeling.
 
 ---
 
 ## Phase 0: Setup
 
-### 0.1 Repo and environment
-**Build**
-- System setup: install `uv`, `ffmpeg`, `yt-dlp` and `gh` (winget) if missing, confirm `nvidia-smi`, install Python 3.11 through `uv`.
-- Turn off co-author attribution in Claude Code settings (user settings on this machine, plus a committed project `.claude/settings.json` so it follows the repo to every machine).
-- Set this repo's `git user.email` to Ari's GitHub noreply address before the first commit (the repo is public).
-- `uv` project, Python 3.11, `pyproject.toml` with core deps (rtmlib, onnxruntime-gpu, opencv-python, supervision, scenedetect, pandas, pyarrow, pyyaml, typer, pytest). Make sure rtmlib can't pull in CPU `onnxruntime` next to `onnxruntime-gpu`.
-- Repo layout from CLAUDE.md, `.gitignore` covering `data/`, `outputs/`, video extensions (`*.mp4 *.mkv *.webm *.mov`), `.venv/`.
-- Apache-2.0 `LICENSE`, placeholder `README.md` (one line: what it is, "not affiliated with Jabbr").
-- `configs/default.yaml` with paths, machine profiles and placeholder thresholds.
-- `deepfoul doctor`: prints Python, onnxruntime providers (must include `CUDAExecutionProvider`), ffmpeg and yt-dlp versions, GPU name, selected profile.
-- `labels/` CSVs created with headers only.
-- `deepfoul fetch`: downloads every video in `fights.csv` with `yt-dlp` into `data/raw/<fight_id>.mp4`, skipping ones already there.
-- Once Ari approves the starter list in `fights.csv`, run `deepfoul fetch` on it (end of 0.1, or start of 1.1 if the list isn't ready yet).
+### 0.1 Repo and environment ✅ Done (RTX 2080)
+Built: uv project, `deepfoul doctor`, `deepfoul fetch`, `deepfoul pose-check`, label CSV headers, 10 tests, machine setup, attribution off, noreply git email. See PROGRESS.md for details.
+
+### 0.2 Starter fights: review, merge, download
+
+**Before the session: Cowork + you**
+1. Cowork research is done (`labels/fights_starter.csv` + `labels/fights_starter_notes.md`).
+2. Read `fights_starter_notes.md`. For each foul fight, open the video link and jump to the foul (round/time from the notes). Make sure:
+   - the foul is actually visible on camera
+   - the video is the full fight, at normal speed, from the official UFC channel
+3. Decide what to swap or drop. You can either edit `fights_starter.csv` directly (this is the one CSV you touch) or list the changes in the kickoff prompt.
+4. Check the buckets still add up (test / foul / clean, splits, variety rules). If a bucket is short, ask Cowork for replacements first.
+
+**Kickoff prompt**
+```
+Read CLAUDE.md, ROADMAP.md and PROGRESS.md. Plan section 0.2 only. Wait for my approval before writing code.
+I've reviewed labels/fights_starter.csv. Changes: <list them, or "none">.
+```
+
+**Claude Code does**
+1. Validate `fights_starter.csv`: unique `fight_id`s in the right format, valid `split` values, valid dates, and URLs that are official UFC YouTube links (or blank). Report any problems and **pause** for Ari to decide.
+2. Add the `action_start_s` / `action_end_s` columns to `fights.csv` (see CLAUDE.md), merge the rows in with those columns blank, delete `fights_starter.csv`, and move the notes to `labels/notes/starter_fights.md`. Commit (metadata only).
+3. Run `deepfoul fetch` on every row with a URL. This can take a while, since each full fight is a few hundred MB.
+4. Check every download with `ffprobe` (duration, resolution, fps) and flag files that look wrong: much shorter or longer than a full fight, under 720p, or a variable frame rate.
+5. Make a contact sheet per fight (frames at 10%, 50% and 90% of the video) in `outputs/fetch_check/`.
+6. Write `outputs/fetch_check/report.md`: one row per fight with status (downloaded / failed / no URL), duration, resolution, flags and the contact sheet path.
 
 **Done when**
-- `uv run deepfoul doctor` shows CUDA active on the current GPU (the 4090 check happens whenever Ari is next on that PC).
-- rtmlib whole-body runs on one test image on GPU and saves an image with skeletons drawn.
-- `git status` after downloading a test video shows nothing under `data/`.
+- Every row with a URL is either downloaded or listed as failed with the error.
+- The report and contact sheets exist.
 
-**Ari**
-- **Claude chat / Cowork:** research the starter list from the Footage guide. Find fights with documented eye pokes and low blows from news coverage, find official full-fight URLs, and note roughly when each foul happens. Output: rows for `labels/fights.csv` (Cowork can write them into the file directly).
-- **You do:**
-  - Run `gh auth login` and approve creating the GitHub repo `ar1shah/deepfoul` (public).
-  - Give Claude Code your GitHub noreply email (GitHub > Settings > Emails).
-  - Approve the fight list. Make sure each "foul fight" really shows the foul on camera, and swap out any fight that isn't available as a full, normal-speed video.
-  - Spot-check that each download plays and is the full fight.
+**You do**
+1. Open `outputs/fetch_check/report.md`.
+2. Look at each contact sheet (5 seconds each): is it the right fighters, the full broadcast, and no overlays?
+3. For any flagged or failed fight, open the video in VLC and decide: keep it, find a new URL (Cowork), or drop it.
+4. **Mark the fight window for every downloaded fight.** Don't trim anything. Open each video in VLC and note two times:
+   - when round 1 actually starts (the first touch of gloves or the ref saying "fight")
+   - when the fight ends (the stoppage, or the final bell for a decision)
+   Format: `ufc276_omalley_munhoz 01:12-12:40`. This takes about a minute per fight: drag the scrubber, don't watch it all.
+5. Give the fight windows and any fight changes to Claude Code in the 1.1 kickoff prompt, or start a quick fix session if a lot failed.
+
+**Send to chat:** the report summary (downloaded / failed / no URL counts per bucket).
 
 ---
 
 ## Phase 1: Perception pipeline (the "eyes")
 
 ### 1.1 Video IO and shot detection
-**Build**
-- Frame reader that yields frames in order with timestamps, supports start/end times and frame stride.
-- PySceneDetect shot boundaries, saved per fight. Tracks reset at cuts.
-- `deepfoul extract --shots <video>` writes `data/cache/<fight_id>_shots.json`.
-- A contact sheet (frames before and after 20 detected cuts) so Ari's spot-check takes 2 minutes.
+
+**Kickoff prompt**
+```
+Read CLAUDE.md, ROADMAP.md and PROGRESS.md. Plan section 1.1 only. Wait for my approval before writing code.
+Fight windows (write these to action_start_s / action_end_s in labels/fights.csv first):
+<paste your fight windows>
+Fight list fixes from 0.2: <list or "none">.
+```
+
+**Claude Code does**
+1. Write the fight windows to `fights.csv` (converting mm:ss to seconds) and apply any fight list fixes.
+2. Frame reader: yields frames in order with timestamps, supports start/end times and frame stride.
+3. PySceneDetect shot boundaries saved to `data/cache/<fight_id>_shots.json` via `deepfoul extract --shots <fight_id>`, only inside the fight window. Tracks reset at cuts.
+4. Run it on 2 train fights.
+5. Contact sheet of 20 detected cuts (the frame before and after each cut) in `outputs/shots_check/`.
 
 **Done when**
-- On 2 full fights, shot cuts land on real camera changes (Ari spot-checks the contact sheet).
+- Shot files exist for 2 fights, and the contact sheet is ready.
 
-**Ari**
-- **Claude chat / Cowork:** propose golden-set candidates: approximate timestamps of the fouls in the foul fights, from news reports and fight recaps.
-- **You do:**
-  - Review the contact sheet.
-  - Build the **golden set** in `labels/golden.csv`. Use **train fights only**, 10 to 30 s each, live speed. Find the exact times by watching:
-    1. Clean stand-up exchange, both fighters fully visible
-    2. Clinch against the cage
-    3. Ref stepping in between the fighters (a break or a stoppage)
-    4. A clear eye poke
-    5. A clear low blow
-    6. (Bonus) a stand-up exchange from a women's fight
+**You do**
+1. Look at the cut contact sheet. Each pair should be two different camera angles. Note any fake cuts (same angle) or obvious missed cuts.
+2. **Pick the golden set.** Watch train fights only (not test) in VLC and write down start and end times for 10 to 30 s clips at live speed (no replays):
+   1. Clean stand-up exchange, both fighters fully visible
+   2. Clinch against the cage
+   3. Ref stepping in between the fighters (a break or a stoppage)
+   4. A clear eye poke
+   5. A clear low blow
+   6. (Bonus) a stand-up exchange from a women's fight
+   Format: `1. ufc276_omalley_munhoz 02:10-02:35 clean exchange` (times from the original video, same as VLC shows)
+3. Paste the cut issues and the golden list into the 1.2 kickoff prompt.
 
 ### 1.2 Detection and tracking
-**Build**
-- Person detection (rtmlib YOLOX) + ByteTrack within each shot.
-- Filters: drop small boxes and boxes outside the cage area (crowd, camera crew). Configurable thresholds.
-- Debug renders (boxes + track IDs) for every golden clip.
+
+**Kickoff prompt**
+```
+Read CLAUDE.md, ROADMAP.md and PROGRESS.md. Plan section 1.2 only. Wait for my approval before writing code.
+Shot detection issues from 1.1: <list or "none">.
+Golden set (write these to labels/golden.csv first):
+<paste your golden list>
+```
+
+**Claude Code does**
+1. Write the golden list to `labels/golden.csv` (converting mm:ss to seconds).
+2. Person detection (rtmlib YOLOX) + ByteTrack within each shot.
+3. Filters: drop small boxes and boxes outside the cage area (crowd, camera crew). Thresholds in config.
+4. Debug renders (boxes + track IDs + timestamp) for every golden clip in `outputs/renders/1.2/`.
 
 **Done when**
-- On the golden clips, the 2 fighters and ref each keep a stable track ID through stand-up exchanges. Crowd is not tracked.
+- On the golden clips, the 2 fighters and the ref each keep a stable track ID through stand-up exchanges, and the crowd isn't tracked.
 
-**Ari**
-- **You do:** watch the debug renders and log every ID swap with a timestamp.
+**You do**
+1. Watch every debug render.
+2. Write down each problem as `clip timestamp what happened` (e.g. `golden 2, 00:12, fighters swapped IDs in clinch`).
+3. Paste the list into the 1.3 kickoff prompt.
 
 ### 1.3 Identity: ref filter and red/blue
-**Build**
-- Per-fight color profiles: sample torso and leg regions from early frames, build HSV histograms per person.
-- Ref detection: the person with shirt + long pants profile (configurable, plus a fallback "third person who never fights" heuristic).
-- Corner assignment from `fights.csv` shorts colors; carry identity across shot cuts by profile matching.
-- Output: per frame, `red` and `blue` boxes (or missing), ref box marked separately.
-- Fill `red_shorts` / `blue_shorts` in `fights.csv`: grab a frame from each fight with both fighters and the broadcast name graphic visible, read off colors and corners, and save those frames to `outputs/` so Ari can verify. Flag fights where the two shorts colors are similar.
+
+**Kickoff prompt**: standard, plus your tracking issue list from 1.2.
+
+**Claude Code does**
+1. **Shorts colors first:** for each fight in `fights.csv`, save one frame where both fighters and the broadcast name graphic are visible to `outputs/shorts_check/<fight_id>.jpg`. Read off the shorts colors and which fighter is in which corner, fill `red_shorts` / `blue_shorts`, and flag fights where the two colors are similar.
+2. **Pause point:** stop and ask Ari to verify the colors.
+3. Per-fight color profiles: sample torso and leg regions from early frames, build HSV histograms per person.
+4. Ref detection: the person with a shirt + long pants profile, plus a fallback ("the third person who never fights").
+5. Corner assignment from the shorts colors. Carry identity across shot cuts by matching profiles.
+6. Re-render the golden clips with red/blue boxes and no box on the ref, in `outputs/renders/1.3/`.
+
+**You do (at the pause point)**
+1. Open each image in `outputs/shorts_check/` and compare it to what Claude Code wrote. A wrong corner flips every label for that fight.
+2. Reply with `colors ok`, or with corrections like `ufc276_omalley_munhoz: red = purple, blue = black`.
 
 **Done when**
-- Golden clips render with correct red/blue labels, no box on the ref, and identities survive at least the cuts in those clips.
-- Works on a fight where both fighters wear similar or dark shorts.
+- Golden clips render with correct red/blue labels, nothing on the ref, and identities survive the cuts in those clips.
+- It works on the similar-shorts fight.
 
-**Ari**
-- **You do:** verify the shorts colors and corners against the saved frames. A wrong corner here flips every label for that fight.
+**You do (after the session)**
+1. Watch the `outputs/renders/1.3/` renders. Note any corner flips or ref boxes.
+2. Paste the issues into the 1.4 kickoff prompt.
 
 ### 1.4 Pose extraction and caching
-**Build**
-- RTMW whole-body on each fighter's tracked box. Save per frame: corner, box, 133 keypoints, confidences.
-- `deepfoul extract <video>` runs shots + tracking + identity + pose and writes `data/keypoints/<fight_id>.parquet`. Resumable if interrupted.
-- Frame stride configurable (default: every frame up to 30 fps).
-- Once it works, run extraction on every downloaded fight (overnight batch) and report any failures.
+
+**Kickoff prompt**: standard, plus your identity issues from 1.3.
+
+**Claude Code does**
+1. RTMW whole-body on each fighter's tracked box. Save per frame: corner, box, 133 keypoints, confidences.
+2. `deepfoul extract <fight_id>` runs shots + tracking + identity + pose and writes `data/keypoints/<fight_id>.parquet`. Resumable if interrupted.
+3. `deepfoul extract --all`: every downloaded fight that isn't extracted yet, writing `outputs/extract_report.md` (fight, status, time taken, frames, % frames with both fighters found).
+4. Test it on one full 3-round fight.
+5. Tell Ari how long the full batch should take on the 2080.
 
 **Done when**
-- One full 3-round fight extracts end to end without crashing.
-- Fingertip and eye keypoints visibly track on the golden poke clip (check with 1.5's render).
+- One full fight extracts end to end, and the report format works.
 
-**Ari**
-- **You do:** leave the PC on overnight for the batch run.
+**You do**
+1. Before bed, open a terminal and run:
+   ```
+   cd C:\Users\AriSh\Documents\projects\deepfoul
+   uv run deepfoul extract --all
+   ```
+   Leave the PC on. If it stops, run the same command again and it picks up where it left off.
+2. In the morning, open `outputs/extract_report.md`. Note any failed fights, or any fight where both fighters were found in under ~70% of frames.
+3. Paste those notes into the 1.5 kickoff prompt.
 
 ### 1.5 Overlay renderer v1 + benchmark
-**Build**
-- `deepfoul render <video> --start --end`: red/blue boxes, corner labels, optional skeleton toggle, frame timestamp.
-- `deepfoul bench`: reports processing speed (fps) for detection, pose, and full pipeline on the current GPU.
-- Render the full golden set and run the benchmark.
+
+**Kickoff prompt**: standard, plus the extract report notes from 1.4.
+
+**Claude Code does**
+1. `deepfoul render <fight_id> --start --end`: red/blue boxes, corner labels, an optional skeleton toggle, and a timestamp.
+2. `deepfoul bench`: processing speed (fps) for detection, pose and the full pipeline on the current GPU.
+3. Render every golden clip with skeletons on, in `outputs/renders/1.5/`, and run the benchmark.
+4. Look into any fights flagged in the extract report.
 
 **Done when**
-- Golden set renders cleanly. Benchmark number is recorded in PROGRESS.md (per machine).
+- The golden set renders cleanly with skeletons, and the benchmark numbers are in PROGRESS.md.
 
-**Ari**
-- **You do:** watch all golden renders. This is the first screenshot-worthy moment; post it if you're building in public.
-- **Claude chat (check-in):** send the benchmark numbers and any recurring tracking failures before Phase 2.
+**You do**
+1. Watch every golden render. On the poke clip, check that the fingertip and eye points follow the actual hand and eye.
+2. Optional: post a clip or screenshot if you're building in public.
+
+**Send to chat:** the benchmark numbers plus anything that still looks wrong in the renders.
 
 ---
 
 ## Phase 2: Data engine
 
 ### 2.1 Labeling app
-**Build**
-- Local FastAPI app + single HTML page. Loads a queue of candidate moments (fight_id + time), plays the clip around each one (default 4 s before, 4 s after), with playback speed control.
-- Keyboard shortcuts: `1` eye poke, `2` low blow, `3` open hand, `4` hard negative, `5` clean, `R`/`B` offender corner, `C` contact yes/no, `S` skip, `←/→` scrub, adjust start/end with brackets.
-- Writes rows to `labels/events.csv` immediately (no data loss on crash). Can also add a moment manually by timestamp.
+
+**Kickoff prompt**: standard.
+
+**Claude Code does**
+1. A local FastAPI app + a single HTML page, started with `uv run deepfoul label`, which opens `http://localhost:8000`.
+2. **Queue mode:** plays a clip around each candidate moment (default 4 s before, 4 s after) with speed control.
+3. **Full-fight mode:** `uv run deepfoul label --fight <fight_id>` opens a whole fight with a scrubber, for adding events by hand (used for val and test fights).
+4. Keyboard shortcuts:
+   - `1` eye poke, `2` low blow, `3` open hand, `4` hard negative, `5` clean
+   - `R` / `B` offender corner, `C` contact yes/no, `M` slow-motion
+   - `[` / `]` set start / end, `←` / `→` scrub, `Space` play/pause, `S` skip, `Enter` save and next
+5. Saves every row to `labels/events.csv` immediately, so nothing is lost on a crash.
+6. A practice queue made from the golden clips so it can be tested before mining exists.
 
 **Done when**
-- Ari labels 30 moments in under 10 minutes without touching the mouse much.
+- Ari can label 30 moments in under 10 minutes, mostly with the keyboard.
 
-**Ari**
-- **You do:** test it hard and write down anything slow or annoying. Most of your hours go into this tool, so it's worth polishing before the big labeling push.
+**You do**
+1. Run `uv run deepfoul label` and do the practice queue.
+2. Write down everything slow or annoying (missing shortcuts, clip too short, video loads slowly).
+3. If the list is long, paste it into a quick fix session before 2.2. Otherwise paste it into the 2.2 kickoff prompt.
 
 ### 2.2 Stoppage finder
-**Build**
-- Scans cached keypoints and flags candidate foul moments using signals that don't need a foul model:
-  - Ref moves between or toward the fighters quickly
-  - Both fighters' motion drops sharply (action paused)
-  - A fighter's hand goes to his own eye region or groin region and stays
-  - Fighter bent over at the waist
-- Score each moment, output a ranked queue for the labeling app.
-- `deepfoul mine <fight_id>` and `deepfoul mine --all`. Run it on every extracted fight and load the queues.
+
+**Kickoff prompt**: standard, plus any labeling app fixes.
+
+**Claude Code does**
+1. Scans cached keypoints for candidate foul moments, using signals that don't need a foul model:
+   - The ref moves quickly between or toward the fighters
+   - Both fighters' motion drops sharply (action paused)
+   - A fighter's hand goes to his own eye or groin region and stays there
+   - A fighter bends over at the waist
+2. Scores each moment and builds a ranked queue per fight (`deepfoul mine <fight_id>`, `deepfoul mine --all`).
+3. Runs `mine --all` on every extracted train fight.
+4. Checks the known fouls from `labels/notes/starter_fights.md` and reports how many land in the top 20 per fight.
 
 **Done when**
-- On fights with known fouls, the real fouls appear in the top candidates (target: most known fouls in the top 20 per fight).
+- Most known fouls appear in their fight's top 20 candidates.
 
-**Ari**
-- **You do:** label the mined queues.
-  - Real fouls -> `eye_poke` / `low_blow`
-  - Stoppages for other reasons (cuts, ref warnings, slips, a glove touch) -> `clean` with a note. These double as hard negatives.
+**You do**
+1. Run `uv run deepfoul label --queue mined` and label every candidate:
+   - Real fouls: `1` eye poke or `2` low blow, plus the offender corner and contact.
+   - Stoppages for other reasons (a cut, a ref warning, a slip, a glove touch): `5` clean, with a short note. These also work as hard negatives.
+2. Don't label val or test fights from the queue. They get full-fight labeling later.
 
-### 2.3 Dataset builder
-**Build**
-- Turns `events.csv` + cached keypoints into training windows (default 2 s window, configurable stride).
-- Positives from labeled fouls; negatives sampled from clean time across fights, with extra weight on `hard_negative` rows.
-- Train / val / test split by fight from `fights.csv`. Refuses to put any test fight in train or val.
-- Summary report: counts per class per split.
-- `deepfoul ingest`: one command for new fights (fetch -> extract -> mine), so adding fights during the data push is a single step.
-- Hard-negative candidate queue: moments where a closed fist or a kick lands near a foul zone with no stoppage afterward, loaded into the labeling app.
+### 2.3 Dataset builder + ingest
+
+**Kickoff prompt**: standard.
+
+**Claude Code does**
+1. `deepfoul build-dataset`: turns `events.csv` + cached keypoints into training windows (default 2 s, configurable stride). Positives come from labeled fouls; negatives are sampled from clean time, with extra weight on hard negatives.
+2. Splits by fight from `fights.csv`, and refuses to put a test fight in train or val (unit tested).
+3. Writes a summary report: counts per class per split.
+4. `deepfoul ingest`: one command for new fights (merge a Cowork draft CSV if present, then fetch -> extract -> mine), writing an ingest report.
+5. A hard-negative candidate queue: moments where a closed fist or kick lands near a foul zone with no stoppage afterward (`--queue hardneg`).
 
 **Done when**
-- `deepfoul build-dataset` produces a dataset file and a summary, and a unit test proves no fight appears in two splits.
+- `build-dataset` produces the dataset and the summary, and the split test passes.
 
-**Ari (the big data push, runs through Phases 2 to 4)**
+**You do**
+- Start the data rounds below.
+
+### Data rounds (repeat through Phases 2 to 4)
 
 Targets before Phase 5:
 
 | Bucket | Target | Where it comes from |
 |---|---|---|
-| Eye pokes | 150+ | Mined from full fights first (live speed with context), then compilations |
+| Eye pokes | 150+ | Mined from full fights first, then compilations |
 | Low blows | 150+ | Same |
-| Hard negatives | 200+ | Closed fists landing near the eye, jabs to the brow, inner-thigh leg kicks, clinch knees to the body, body kicks caught low |
-| Clean | Automatic | Sampled by the dataset builder, no work for you |
-| Full fights | 30+ train, 5 to 6 val | Keep adding using the Footage guide rules |
+| Hard negatives | 200+ | `--queue hardneg`, plus clean stoppages from mining |
+| Clean | Automatic | Sampled by the dataset builder |
+| Full fights | 30+ train, 5 to 6 val | Footage guide rules |
 
-- **Claude chat / Cowork:** find more full fights with documented fouls, plus 4 to 6 eye poke and low blow compilations. Add them as rows in `fights.csv` (compilations as `split=train`). Then run `deepfoul ingest` in Claude Code.
-- **You do:**
-  - All labeling. Mark `speed=slowmo` on slow-motion replays and `source=compilation` on compilation clips.
-  - Skip any compilation segment from a Gane fight (leakage rule).
-- **Claude chat (check-in):** send the dataset summary when you hit ~50 positives per foul.
+**One round:**
+1. **Cowork:** "Find 5 to 10 more UFC full fights with documented eye pokes or low blows (plus 1 to 2 compilations), following the Footage guide in ROADMAP.md. Write them to `labels/fights_draft.csv` with the same columns as fights.csv, plus a notes file."
+2. **You:** review the draft the same way as in 0.2 (foul visible, full fight, official upload), and note each fight's window (`fight_id mm:ss-mm:ss`).
+3. **Claude Code** (short session): `Run deepfoul ingest on labels/fights_draft.csv with these fight windows: <paste>. Show me the ingest report.` For a big batch, run `uv run deepfoul ingest` yourself overnight instead.
+4. **You:** label the new queues:
+   - `uv run deepfoul label --queue mined`
+   - `uv run deepfoul label --queue hardneg`
+   - For compilations: `M` on slow-motion clips, and skip any Gane segment (leakage rule).
+5. **Claude Code** (same short session or the next one): `uv run deepfoul build-dataset`, then report the counts.
+
+**Send to chat:** the dataset summary once you hit about 50 positives per foul, and again before Phase 5.
 
 ---
 
 ## Phase 3: Features, rules and evaluation
 
-### 3.1 Evaluation harness (built before the rules so we can measure them)
-**Build**
-- Event matching (±1.0 s default), per-type recall, precision, false flags per fight.
-- `deepfoul eval --split val` prints a table and saves a report with the list of misses and false flags (fight + timestamp) so Ari can watch them.
+### 3.0 Label the val fights (you, before 3.1)
+1. For each val fight: `uv run deepfoul label --fight <fight_id>`.
+2. Watch the whole fight and mark every eye poke, low blow and open hand. An unlabeled foul turns into a fake "false flag" and drags every metric down.
+3. Do it in one pass per fight, without any model output on screen.
+
+### 3.1 Evaluation harness
+
+**Kickoff prompt**: standard.
+
+**Claude Code does**
+1. Event matching (±1.0 s default). Per foul type: recall, precision and false flags per fight.
+2. `deepfoul eval --split val`: prints a table and saves `outputs/eval/<run>/report.md`, listing every miss and false flag (fight + time).
+3. Unit tests on made-up predictions and labels, plus dummy "always flag" and "never flag" detectors that give the expected numbers.
 
 **Done when**
-- Metrics are unit-tested on hand-made prediction/label lists, and a dummy "always flag" and "never flag" detector produce the expected numbers.
+- The tests pass and the dummy detectors produce sane reports.
 
-**Ari**
-- **You do:** make sure every foul in the val fights is labeled. Any unlabeled foul turns into a fake "false flag" and drags the numbers down.
+**You do**
+- Nothing new. Keep doing data rounds if you have time.
 
 ### 3.2 Feature layer
-**Build**
-- Keypoint subset, normalization by torso length, confidence masking.
-- Cross-fighter geometry: each fighter's fingertips relative to the opponent's eye region; feet/shins/knees relative to the opponent's groin zone (below hip midpoint, between hips).
-- Kinematics: velocities, head jerk, torso bend angle, hand-to-own-face and hand-to-own-groin distances.
-- Finger extension score per hand (fingertip-to-wrist distance vs knuckle-to-wrist, plus joint straightness).
-- Feature plots for the golden poke and low blow clips.
+
+**Kickoff prompt**: standard.
+
+**Claude Code does**
+1. Keypoint subset, normalization by torso length, confidence masking.
+2. Cross-fighter geometry: fingertips relative to the opponent's eye region; feet, shins and knees relative to the opponent's groin zone.
+3. Motion features: velocities, head jerk, torso bend, hand-to-own-face and hand-to-own-groin distance, finger extension score.
+4. Feature plots for the golden poke and low blow clips in `outputs/features/`.
 
 **Done when**
-- The golden poke plot shows the fingertip-to-eye distance dropping at the poke and the reaction features spiking after it.
+- The poke plot shows fingertip-to-eye distance dropping at the poke and the reaction features spiking after it.
 
-**Ari**
-- **You do:** look at the plots and confirm the spikes line up with what you see in the clip. Keep labeling in the background.
+**You do**
+1. Open the plots next to the golden clip in VLC. Do the spikes line up with what you see?
+2. If not, note the timestamps and put them in the 3.3 kickoff prompt.
 
 ### 3.3 Rule detectors v0
-**Build**
-- `open_hand`: fingers extended + pointing at the opponent's face + within range.
-- `eye_poke`: fingertip enters the eye zone, then a reaction within the lookahead (hand to face, head snap, action stops).
-- `low_blow`: foot/shin/knee enters the groin zone, then a reaction (bend at waist, hands to groin, action stops).
-- Event logic: window scores -> events with hysteresis, merging of nearby flags, cooldown, offender corner.
-- `deepfoul detect <video>` writes `outputs/<fight_id>_events.json`.
-- A single review reel of every false flag and miss from the val eval report, with a caption on each (fight, time, predicted vs labeled).
+
+**Kickoff prompt**: standard, plus any plot issues from 3.2.
+
+**Claude Code does**
+1. `open_hand`: fingers extended, pointing at the opponent's face, within range.
+2. `eye_poke`: a fingertip enters the eye zone, then a reaction within the lookahead (hand to face, head snap, action stops).
+3. `low_blow`: a foot, shin or knee enters the groin zone, then a reaction (bending at the waist, hands to the groin, action stops).
+4. Event logic: window scores -> events (hysteresis, merging nearby flags, cooldown, offender corner).
+5. `deepfoul detect <fight_id>` writes `outputs/<fight_id>_events.json`.
+6. Runs `eval --split val` and builds a **review reel**: one video of every miss and false flag, each captioned with fight, time, and predicted vs labeled, in `outputs/eval/<run>/review_reel.mp4`.
 
 **Done when**
-- Rules fire on the golden poke and low blow clips and stay quiet on the clean clip.
-- `deepfoul eval --split val` report exists with real numbers (they'll be rough; that's fine).
+- The rules fire on the golden poke and low blow clips and stay quiet on the clean clip.
+- The val eval report and the review reel exist. The numbers will be rough, and that's fine.
 
-**Ari**
-- **You do:** watch the review reel and sort each mistake into a bucket (tracking failure, keypoint jitter, camera angle, wrong threshold, label mistake).
-- **Claude chat (check-in):** send the bucket counts. This decides what Phase 4 fixes.
+**You do**
+1. Watch the review reel. Put every mistake into one bucket: tracking failure, keypoint jitter, camera angle, wrong threshold, or label mistake.
+2. Count the buckets.
+
+**Send to chat:** the eval table and the bucket counts. Together we pick what 4.1 fixes.
 
 ---
 
 ## Phase 4: Make it not suck
 
 ### 4.1 Error-driven fixes
-**Build**
-- Fix the top 2 to 3 failure buckets from 3.3 (likely candidates: keypoint smoothing, better ref/ID handling in clinches, replay/slow-motion handling, depth ambiguity from 2D overlap).
-- Tune thresholds on **val only**.
+
+**Kickoff prompt**
+```
+Read CLAUDE.md, ROADMAP.md and PROGRESS.md. Plan section 4.1 only. Wait for my approval before writing code.
+Buckets from the 3.3 review: <counts>. Fix these first: <the 2 to 3 we picked>.
+Label mistakes to fix: <fight_id mm:ss what's wrong>.
+```
+
+**Claude Code does**
+1. Fix the label mistakes Ari listed.
+2. Fix the chosen buckets (likely: keypoint smoothing, ID handling in clinches, depth ambiguity).
+3. Tune thresholds on **val only**.
+4. Re-run eval and the golden set, and make a new review reel.
 
 **Done when**
-- Val metrics improve on the targeted buckets and the golden set has no regressions.
+- Val metrics improve on the targeted buckets with no golden set regressions.
 
-**Ari**
-- **You do:** fix any labels the review reel showed were wrong. Keep labeling, prioritizing hard negatives that fooled the rules.
+**You do**
+1. Watch the new reel and recount the buckets.
+2. Keep doing data rounds, prioritizing hard negatives that fooled the rules.
 
 ### 4.2 Replays and broadcast junk
-**Build**
-- Collect 10 to 15 example replay transitions from the downloaded fights as test cases.
-- Detect broadcast replays (slow motion and/or the replay transition graphic) so the same foul isn't counted twice; replays get tagged, not flagged.
-- Skip between-round segments (cornermen in frame).
+
+**Kickoff prompt**: standard.
+
+**Claude Code does**
+1. Finds 10 to 15 example replay transitions in the downloaded fights and saves them to `outputs/replay_check/`.
+2. **Pause point:** Ari confirms they're real replays.
+3. Detects replays (slow motion and/or the replay transition graphic) so they get tagged, not flagged. Skips between-round segments.
+4. Re-runs eval on 3 full val fights.
+
+**You do (at the pause point)**
+- Look through `outputs/replay_check/` and reply `ok` or list the wrong ones.
 
 **Done when**
 - No double flags from replays on 3 full val fights.
-
-**Ari**
-- **You do:** confirm the replay examples are real replays. Keep labeling.
 
 ---
 
 ## Phase 5: Learned classifier
 
+Don't start until the data round targets are hit. Under about 100 positives per foul, the model will just memorize.
+
 ### 5.1 Baseline model
-**Build**
-- LightGBM on window-level engineered features (from 3.2). Class weights for imbalance.
-- Thresholds picked on val. Compare against rules in one table.
 
-**Done when**
-- Comparison table (rules vs LightGBM) on val is in PROGRESS.md.
+**Kickoff prompt**: standard, plus the latest dataset summary.
 
-**Ari**
-- **You do:** hit the 2.3 targets before this section starts. Under ~100 positives per foul, the model will just memorize.
+**Claude Code does**
+1. LightGBM on window features from 3.2, with class weights for the imbalance.
+2. Thresholds picked on val.
+3. A comparison table (rules vs LightGBM) in PROGRESS.md.
+
+**You do**
+- Nothing new.
 
 ### 5.2 Temporal model
-**Build**
-- Small PyTorch model (1D CNN or GRU) on normalized keypoint sequences per window, two-fighter input. Trains in minutes on either GPU.
-- Simple augmentation: horizontal flip with left/right keypoint swap, small scale/jitter noise.
-- `deepfoul train` and saved weights with config.
 
-**Done when**
-- Three-way comparison (rules, LightGBM, temporal) on val. Pick the default detector (or an ensemble, e.g. open_hand from rules + fouls from the model).
+**Kickoff prompt**: standard.
 
-**Ari**
-- **Claude chat (check-in):** make the pick together using the comparison table.
+**Claude Code does**
+1. A small PyTorch model (1D CNN or GRU) on normalized two-fighter keypoint sequences. Trains in minutes on the 2080.
+2. Augmentation: horizontal flip with left/right keypoint swap, plus small scale and jitter noise.
+3. `deepfoul train`, saved weights + config.
+4. A three-way comparison table (rules, LightGBM, temporal) on val.
+
+**Send to chat:** the comparison table. Together we pick the default detector (one model, or a mix like open hand from rules + fouls from the model).
 
 ### 5.3 Hard-negative loop
-**Build**
-- Export the model's top-scoring false flags on train fights into the labeling queue.
-- After Ari labels them, retrain and re-run the comparison.
 
-**Done when**
-- One full loop done: Ari labels the exported queue, retrain, val improves or the PROGRESS.md entry explains why not.
+**Kickoff prompt**: standard, plus which detector we picked.
 
-**Ari**
-- **You do:** label the exported false flags (mostly `hard_negative`).
-- **Claude chat (check-in):** send the comparison table before running the test set.
+**Claude Code does**
+1. Exports the model's top-scoring false flags on train fights to `--queue modelneg`.
+2. **Pause point:** Ari labels the queue.
+3. Retrains and re-runs the comparison.
+
+**You do (at the pause point)**
+1. `uv run deepfoul label --queue modelneg`. Most of these will be `4` hard negative.
+2. Reply `done labeling` in Claude Code.
+
+**Send to chat:** the new comparison table, before Phase 6.
 
 ---
 
-## Phase 6: The demo (detector as a product)
+## Phase 6: The demo
+
+### 6.0 Label the test fights (you, before 6.1)
+1. Make sure every test fight is downloaded (see "Videos with no free official upload").
+2. Tell Claude Code to run `deepfoul extract` on the test fights (a quick session).
+3. For each test fight: `uv run deepfoul label --fight <fight_id>`. Mark every eye poke, low blow and open hand in one sitting, without looking at any model output.
 
 ### 6.1 Final test run
-**Build**
-- Run the chosen detector on the held-out Gane test fights once. Save the report. No tuning after this run (if something is tuned, it has to be re-justified on val and noted).
 
-**Done when**
-- Test metrics and every flagged event (with timestamps) are in PROGRESS.md.
+**Kickoff prompt**: standard.
 
-**Ari**
-- **You do:** label every foul and open hand in the Gane test fights **before** this run (in one sitting, without looking at any model output). Then don't touch anything after the run.
+**Claude Code does**
+1. Runs the chosen detector on the test fights **once** and saves the report.
+2. Writes the test metrics and every flagged event (with timestamps) to PROGRESS.md.
+3. No tuning after this. Any later change has to be justified on val and noted.
+
+**You do**
+- Read the report. Don't ask for tweaks based on the test results.
 
 ### 6.2 Overlay v2 (broadcast style)
-**Build**
-- Red/blue boxes with head and torso sub-boxes per fighter.
-- Foul zone highlight: the eye region or groin zone glows when a hand or foot enters it.
-- On a flag: box flashes + banner (e.g. `EYE POKE · BLUE -> RED · 0.87 · REVIEW`).
-- Skeleton shown only for ~1 s around a flag.
-- Side panel: foul log (time, type, offender, confidence) and open hands per round.
-- Own visual identity. No Jabbr/DeepStrike branding.
 
-**Done when**
-- Renders of the Gane pokes look good enough to post.
+**Kickoff prompt**: standard.
 
-**Ari**
-- **You do:** give design feedback on the renders (colors, panel layout, banner timing).
+**Claude Code does**
+1. Red/blue boxes with head and torso sub-boxes per fighter.
+2. Foul zone highlight: the eye region or groin zone glows when a hand or foot enters it.
+3. On a flag: the box flashes and a banner appears (e.g. `EYE POKE · BLUE -> RED · 0.87 · REVIEW`).
+4. Skeleton shown only for about 1 s around a flag.
+5. Side panel: foul log (time, type, offender, confidence) and open hands per round.
+6. Its own visual identity, with no Jabbr or DeepStrike branding.
+7. Renders of the Gane test moments in `outputs/renders/6.2/`.
+
+**You do**
+1. Watch the renders and write design feedback (colors, panel layout, banner timing).
+2. Do a quick fix session with that feedback, or send it to chat first if you're unsure.
 
 ### 6.3 Stats graphic + live-readiness check
-**Build**
-- Per-fight shareable graphic (no footage): open hands per round per fighter, flagged fouls, timeline.
-- Streaming mode check: run the detector frame-by-frame with only the allowed lookahead and confirm identical events to batch mode. Record latency and fps.
-- Export short candidate clips of every flagged moment in the test fights.
 
-**Done when**
-- Graphic exported as PNG; streaming vs batch match; fps + latency numbers in PROGRESS.md (this becomes the "live-ready" line in the pitch).
+**Kickoff prompt**: standard.
 
-**Ari**
-- **You do:** pick the 3 best demo moments (ideally Gane's open hands flagged before a poke lands).
+**Claude Code does**
+1. A shareable per-fight graphic (no footage): open hands per round per fighter, flagged fouls, a timeline. Saved as PNG.
+2. Streaming check: runs the detector frame by frame with only the allowed lookahead, confirms it matches batch mode, and records latency and fps.
+3. Exports short clips of every flagged moment in the test fights to `outputs/demo_candidates/`.
+
+**You do**
+1. Watch `outputs/demo_candidates/` and pick the 3 best moments (ideally Gane's open hands flagged before a poke lands).
+2. Put the picks in the 7.1 kickoff prompt.
 
 ---
 
 ## Phase 7: Ship it
 
 ### 7.1 Repo polish
-**Build**
-- README: demo GIF at top, the problem in one line, how it works (simple diagram), results table with honest numbers, quickstart, limitations, roadmap, "not affiliated with Jabbr".
-- Demo GIF from Ari's 3 picked moments with ffmpeg (a few seconds each, overlay on).
-- Release trained weights via GitHub Releases. `labels/` documented so anyone can rebuild the dataset.
-- Clean up CLI help, configs, and tests.
-- Test the README quickstart on a fresh clone.
+
+**Kickoff prompt**
+```
+Read CLAUDE.md, ROADMAP.md and PROGRESS.md. Plan section 7.1 only. Wait for my approval before writing code.
+Demo moments: <your 3 picks>.
+```
+
+**Claude Code does**
+1. A demo GIF from the 3 picks with ffmpeg (a few seconds each, overlay on).
+2. README: the GIF at the top, the problem in one line, how it works (a simple diagram), a results table with honest numbers, quickstart, limitations, roadmap, "not affiliated with Jabbr".
+3. Trained weights released through GitHub Releases. `labels/` documented so anyone can rebuild the dataset.
+4. CLI help, configs and tests cleaned up.
+5. Tests the README quickstart on a fresh clone.
 
 **Done when**
-- A fresh clone + README quickstart runs `deepfoul detect` on a user-supplied video.
+- A fresh clone + the quickstart runs `deepfoul detect` on a new video.
 
-**Ari**
-- **Claude chat:** draft the X thread, and write the Jabbr pitch email together (ask: paid trial project).
-- **You do:**
-  - Final read of the README and the numbers.
-  - Post the thread and send the email from ari@ar13.dev.
+**You do**
+1. Read the README start to finish and check the numbers.
+
+**Send to chat:** the README + results. Together we write the X thread and the Jabbr pitch email (the ask: a paid trial project). Then you post the thread and send the email from ari@ar13.dev.
 
 ---
 

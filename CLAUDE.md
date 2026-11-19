@@ -17,13 +17,15 @@ It flags clips for a replay official. It never makes the call itself (think VAR,
   3. When a decision is Ari's to make, give 2 to 3 options with a recommendation and the tradeoff in one line each.
   4. Build it, run it, and verify the section's **Done when** criteria for real (on actual clips, not just unit tests).
   5. Update `PROGRESS.md` (what was built, decisions and why, known issues, next step). Then stop.
+- Some ROADMAP sections have a **pause point**: stop there, tell Ari exactly what to check, and wait for his reply before continuing.
+- Ari doesn't hand-edit CSVs (except `events.csv` through the labeling app). When he gives you timestamps, corrections or fight changes in a prompt, you write them to the right file.
 - Do not start the next section on your own.
 - If a section turns out much bigger than expected, stop and propose splitting it.
 
 ## Environment
 - Work moves between machines, so nothing can be machine-specific:
-  - Windows desktop with an RTX 4090 (24 GB): main GPU machine
-  - Windows gaming PC with an RTX 2080 (8 GB): GPU machine while Ari is home. Everything must run within 8 GB of VRAM (configurable batch sizes, model size presets).
+  - **Current machine: Windows gaming PC with an RTX 2080 (8 GB).** All work happens here for now. Everything must run within 8 GB of VRAM (configurable batch sizes, model size presets).
+  - Later: Windows desktop with an RTX 4090 (24 GB), not in use yet. When Ari switches to it, follow the "Switching machines" checklist in PROGRESS.md. Don't plan or verify anything for it until then.
   - Mac: development and labeling only; CPU fallback for quick tests on short clips
 - Native Windows on the PCs, not WSL, unless dependencies force a switch (ask first).
 - The code syncs through GitHub. Footage never syncs: `deepfoul fetch` re-downloads every video listed in `labels/fights.csv` into `data/raw/`, so any machine can rebuild its data from the CSV.
@@ -75,12 +77,15 @@ Do not add AGPL or non-commercial dependencies (e.g. Ultralytics YOLO, OpenPose)
 - Keep it simple. No abstractions until there is a second user of them.
 
 ## Data rules (important)
+- **Never trim, cut or re-encode the raw videos.** Every timestamp in the project is relative to the original downloaded file, so another machine running `deepfoul fetch` gets the exact same timeline. Skip unwanted footage with `action_start_s` / `action_end_s` instead.
 - `data/` and `outputs/` are gitignored. **Never commit video, clips, frames or downloaded footage.** Check `git status` before every commit.
 - What IS committed: `labels/fights.csv`, `labels/events.csv`, `labels/golden.csv` (metadata only: URLs, timestamps, labels) and trained model weights (via GitHub Releases, not the repo, if large).
 - Held-out test set: Ciryl Gane fights (vs Tom Aspinall at UFC 321, vs Josh Hokit at UFC 334, plus any others Ari adds). These are `split=test` in `fights.csv` and are only run at the end of a phase for reporting.
 
 ### Label schemas
-`labels/fights.csv`: `fight_id, event, date, red_fighter, blue_fighter, red_shorts, blue_shorts, source_url, split (train|val|test), notes`
+`labels/fights.csv`: `fight_id, event, date, red_fighter, blue_fighter, red_shorts, blue_shorts, source_url, split (train|val|test), action_start_s, action_end_s, notes`
+
+`action_start_s` / `action_end_s`: when round 1 starts and when the fight ends, in seconds of the original video. Everything outside this window (intros, walkouts, post-fight interviews) is skipped by extraction, mining, detection and eval. Blank means use the whole video.
 
 `labels/events.csv`: `event_id, fight_id, start_s, end_s, foul_type (eye_poke|low_blow|open_hand|hard_negative|clean), offender (red|blue|none), contact (yes|no|unsure), ref_stopped (yes|no), speed (live|slowmo), source (full_fight|compilation|mined), notes`
 
