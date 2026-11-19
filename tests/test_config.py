@@ -36,7 +36,7 @@ EVENT_COLS = ["event_id", "fight_id", "start_s", "end_s", "foul_type", "offender
               "contact", "ref_stopped", "speed", "source", "notes"]
 EXPECTED = {
     "fights.csv": ["fight_id", "event", "date", "red_fighter", "blue_fighter", "red_shorts",
-                   "blue_shorts", "source_url", "split", "notes"],
+                   "blue_shorts", "source_url", "split", "action_start_s", "action_end_s", "notes"],
     "events.csv": EVENT_COLS,
     "golden.csv": EVENT_COLS,
 }

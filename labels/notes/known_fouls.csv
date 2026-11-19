@@ -1,0 +1,17 @@
+fight_id,live_s,replay_s,foul_type,offender,victim,ref_paused,visibility,notes
+ufc321_aspinall_gane,523,535,eye_poke,blue,red,yes,clear_live,
+ufc285_jones_gane,47,61,low_blow,blue,red,yes,clear_live,
+ufcfn20251101_cortesacosta_delija,209,280,eye_poke,blue,red,yes,hard_live,stopped then restarted after evaluation; clear replay
+ufc326_garbrandt_long,810,828,low_blow,blue,red,yes,clear_live,1 of 3
+ufc326_garbrandt_long,880,913,low_blow,blue,red,yes,clear_live,2 of 3
+ufc326_garbrandt_long,1076,1107,low_blow,blue,red,yes,clear_live,3 of 3
+ufcfn20251018_holland_malott,302,316,low_blow,blue,red,yes,clear_live,1 of 2
+ufcfn20251018_holland_malott,352,384,low_blow,blue,red,yes,clear_live,2 of 2
+ufcfn20240316_battle_loosa,489,506,eye_poke,red,blue,yes,clear_live,
+ufc276_munhoz_omalley,727,749,eye_poke,blue,red,yes,clear_live,
+ufcfn20241214_kape_silva,165,182,low_blow,blue,red,yes,clear_live,1 of 2
+ufcfn20241214_kape_silva,474,498,low_blow,blue,red,yes,clear_live,2 of 2
+ufcfn20241214_kape_silva,813,,eye_poke,blue,red,no,clear_live,"quick, no pause, no replay"
+ufc300_gaethje_holloway,430,447,eye_poke,blue,red,yes,hard_live,clearer in replay; clear at 07:30 (450 s)
+ufc300_gaethje_holloway,578,595,eye_poke,blue,red,yes,hard_live,clear in replay at 9:58 (598 s)
+ufcfn20210313_edwards_muhammad,546,564,eye_poke,red,blue,yes,hard_live,clear in replay at 09:28 (568 s)
