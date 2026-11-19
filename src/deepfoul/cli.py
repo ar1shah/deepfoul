@@ -156,6 +156,158 @@ def fetch_check(
     typer.echo(f"report: {out_dir / 'report.md'}")
 
 
+def _fight_rows(fight_ids: list[str], split: str | None = None) -> list[dict[str, str]]:
+    """fights.csv rows for the given ids (all rows of `split` if no ids given)."""
+    from deepfoul.io.fetch import read_fights
+
+    cfg = load_config()
+    rows = {r["fight_id"].strip(): r for r in read_fights(cfg["paths"]["labels"] / "fights.csv")}
+    if not fight_ids:
+        return [r for r in rows.values() if split is None or r["split"].strip() == split]
+    missing = [f for f in fight_ids if f not in rows]
+    if missing:
+        raise typer.BadParameter(f"not in fights.csv: {', '.join(missing)}")
+    return [rows[f] for f in fight_ids]
+
+
+@app.command()
+def extract(
+    fight_ids: list[str] = typer.Argument(None, help="fight_ids from fights.csv."),
+    shots: bool = typer.Option(False, "--shots", help="Detect camera cuts (the only stage so far)."),
+    split: str = typer.Option(None, "--split", help="Run every fight in this split instead."),
+    force: bool = typer.Option(False, "--force", help="Re-run even if the cache is up to date."),
+) -> None:
+    """Run perception stages on fights. Writes data/cache/<fight_id>_shots.json."""
+    import time
+
+    from deepfoul.io.fights import window
+    from deepfoul.io.shots import detect_shots, load_shots, save_shots, shots_path, stale_reason
+
+    if not shots:
+        raise typer.BadParameter("nothing to do: pass --shots (pose extraction lands in 1.4)")
+    if not fight_ids and not split:
+        raise typer.BadParameter("give fight_ids or --split")
+    cfg = load_config()
+    for row in _fight_rows(fight_ids or [], split):
+        fid = row["fight_id"].strip()
+        video = cfg["paths"]["raw"] / f"{fid}.mp4"
+        if not video.exists():
+            typer.secho(f"{fid}: no video at {video}, run `deepfoul fetch`", fg="red", err=True)
+            continue
+        start, end = window(row)
+        win = (start or 0.0, end)
+        out = shots_path(cfg["paths"]["cache"], fid)
+        if out.exists() and not force:
+            reason = stale_reason(load_shots(out), win, cfg["shots"])
+            if reason is None:
+                typer.echo(f"{fid}: up to date ({out.name})")
+                continue
+            typer.echo(f"{fid}: re-running, {reason}")
+        t0 = time.perf_counter()
+        doc = {"fight_id": fid, **detect_shots(video, win[0], win[1], cfg["shots"])}
+        save_shots(doc, out)
+        lens = [s["end_s"] - s["start_s"] for s in doc["shots"]]
+        typer.echo(f"{fid}: {len(lens)} shots, median {sorted(lens)[len(lens) // 2]:.1f}s, "
+                   f"{time.perf_counter() - t0:.0f}s -> {out}")
+
+
+@app.command("shots-check")
+def shots_check(
+    fight_ids: list[str] = typer.Argument(None, help="Fights to draw cut sheets for."),
+    n: int = typer.Option(20, "--n", help="Total cuts on the sheets, split evenly over the fights."),
+) -> None:
+    """Cut contact sheets + outputs/shots_check/report.md (all cached fights in the report)."""
+    from deepfoul.io.previews import cut_contact_sheet, shot_summary, write_shots_report
+    from deepfoul.io.shots import load_shots
+
+    cfg = load_config()
+    out_dir = cfg["paths"]["outputs"] / "shots_check"
+    sheet_ids = fight_ids or []
+    for fid in sheet_ids:
+        if not (cfg["paths"]["cache"] / f"{fid}_shots.json").exists():
+            raise typer.BadParameter(f"{fid}: no shot file, run `deepfoul extract {fid} --shots`")
+    per = -(-n // len(sheet_ids)) if sheet_ids else 0
+    entries = []
+    for path in sorted(cfg["paths"]["cache"].glob("*_shots.json")):
+        doc = load_shots(path)
+        fid = doc["fight_id"]
+        e = {"fight_id": fid, "summary": shot_summary(doc)}
+        if fid in sheet_ids:
+            sheet = out_dir / f"{fid}_cuts.jpg"
+            e["cuts"] = cut_contact_sheet(cfg["paths"]["raw"] / f"{fid}.mp4", doc, per, sheet)
+            e["sheet"] = sheet.name
+        entries.append(e)
+        s = e["summary"]
+        typer.echo(f"{fid:<36} {s['shots']:>4} shots  >60s: {len(s['long'])}  <1s: {len(s['short'])}")
+    write_shots_report(entries, out_dir / "report.md")
+    typer.echo(f"report: {out_dir / 'report.md'}")
+
+
+GOLDEN_EXCLUDE = {"ufc326_garbrandt_long", "ufcfn20210313_edwards_muhammad"}  # video quality
+
+
+@app.command("golden-candidates")
+def golden_candidates() -> None:
+    """Preview clips of every clear_live known foul in train fights -> outputs/golden_candidates/."""
+    from deepfoul.io.fetch import read_fights
+    from deepfoul.io.previews import (clip_name, fmt_ts, golden_selection, read_known_fouls,
+                                      write_preview_clip)
+
+    cfg = load_config()
+    labels = cfg["paths"]["labels"]
+    fouls = golden_selection(read_fights(labels / "fights.csv"),
+                             read_known_fouls(labels / "notes" / "known_fouls.csv"), GOLDEN_EXCLUDE)
+    pad = float(cfg["previews"]["golden_pad_s"])
+    out_dir = cfg["paths"]["outputs"] / "golden_candidates"
+    lines = ["# Golden candidates", "",
+             f"Clear-live known fouls in train fights, live time +- {pad:.0f} s. "
+             "Burned-in text is the original video time (mm:ss.cc) and frame index.", "",
+             "| clip | fight_id | live | type | offender | notes |", "|---|---|---|---|---|---|"]
+    for f in fouls:
+        live = float(f["live_s"])
+        name = clip_name(f["fight_id"], live, f["foul_type"])
+        n = write_preview_clip(cfg["paths"]["raw"] / f"{f['fight_id']}.mp4",
+                               max(live - pad, 0.0), live + pad, out_dir / name)
+        typer.echo(f"{name}: {n} frames")
+        lines.append(f"| [{name}]({name}) | {f['fight_id']} | {fmt_ts(live)} | {f['foul_type']} | "
+                     f"{f['offender']} | {f['notes']} |")
+    (out_dir / "index.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    typer.echo(f"index: {out_dir / 'index.md'}")
+
+
+@app.command("frame-check")
+def frame_check_cmd(
+    fight_id: str = typer.Argument(...),
+    times: list[float] = typer.Option(None, "--t", help="Times to check (default: 5 in the window)."),
+) -> None:
+    """Compare the frame reader to ffmpeg (pixel diff) and to decoding from 10 s earlier."""
+    from deepfoul.io.fights import window
+    from deepfoul.io.video import frame_check, video_info
+
+    cfg = load_config()
+    row = _fight_rows([fight_id])[0]
+    video = cfg["paths"]["raw"] / f"{fight_id}.mp4"
+    info = video_info(video)
+    typer.echo(f"{fight_id}: {info['width']}x{info['height']} r={info['r_frame_rate']} "
+               f"avg={info['avg_frame_rate']} start_time={info['start_time']} "
+               f"flags={info['flags'] or 'none'}")
+    if not times:
+        start, end = window(row)
+        start, end = start or 0.0, end or info["duration_s"]
+        # Off-grid times (not on a frame boundary) so rounding mistakes show up.
+        times = [round(start + p * (end - start), 3) + 0.013 for p in (0.05, 0.27, 0.5, 0.73, 0.95)]
+    bad = 0
+    for r in frame_check(video, times):
+        ok = r["best_offset"] == 0 and r["diff_ffmpeg"] < 1.0 and r["seek_vs_linear"] == 0.0
+        bad += not ok
+        typer.echo(f"t={r['t']:.3f} -> f{r['idx']} ({r['frame_t']:.3f}s)  "
+                   f"ffmpeg diff {r['diff_ffmpeg']:.2f}  best offset {r['best_offset']:+d}  "
+                   f"neighbours {', '.join(f'{k:+d}:{v:.1f}' for k, v in sorted(r['diffs'].items()))}  "
+                   f"seek vs linear {r['seek_vs_linear']:.2f}  {'OK' if ok else 'MISMATCH'}")
+    if bad:
+        raise typer.Exit(1)
+
+
 @app.command("pose-check")
 def pose_check(
     image: Path = typer.Argument(..., exists=True, dir_okay=False),
