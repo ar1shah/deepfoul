@@ -32,6 +32,7 @@ Claude Code updates this file at the end of every ROADMAP section. Newest entrie
 - Pipeline speed (fps on RTX 2080): -
 - Labeled positives: eye_poke - / low_blow - / open_hand -
 - Fights: train 9 / val 4 / test 2 (8 foul, 5 clean, 2 test). Known fouls: 16 (`labels/notes/known_fouls.csv`)
+- Val fights: Cortes Acosta-Delija, Kape-Silva, Gaethje-Holloway, Garry-Prates (6 known fouls). Kape-Silva and Garbrandt-Long swapped splits after 0.2, because Garbrandt-Long's video is cropped and likely frame-interpolated.
 - Best val metrics: -
 - Test metrics: -
 

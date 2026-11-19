@@ -16,7 +16,8 @@ It flags clips for a replay official. It never makes the call itself (think VAR,
   2. Propose a plan for the section (files, approach, open questions). Wait for Ari's approval before writing code.
   3. When a decision is Ari's to make, give 2 to 3 options with a recommendation and the tradeoff in one line each.
   4. Build it, run it, and verify the section's **Done when** criteria for real (on actual clips, not just unit tests).
-  5. Update `PROGRESS.md` (what was built, decisions and why, known issues, next step). Then stop.
+  5. Update `PROGRESS.md` (what was built, decisions and why, known issues, next step).
+  6. Update `ROADMAP.md`: move the finished section into the **Done** list as a 2 to 3 line summary, and move the next section's full text into the **Now** slot at the top (adjusting its kickoff prompt and steps for anything that changed). Then stop.
 - Some ROADMAP sections have a **pause point**: stop there, tell Ari exactly what to check, and wait for his reply before continuing.
 - Ari doesn't hand-edit CSVs (except `events.csv` through the labeling app). When he gives you timestamps, corrections or fight changes in a prompt, you write them to the right file.
 - Do not start the next section on your own.

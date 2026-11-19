@@ -1,5 +1,37 @@
 # DeepFoul Roadmap
 
+## ▶ Now: 1.1 Video IO and shot detection
+
+**Kickoff prompt**
+```
+Read CLAUDE.md, ROADMAP.md and PROGRESS.md. Plan section 1.1 only. Wait for my approval before writing code.
+```
+
+**Claude Code does**
+1. Frame reader: yields frames in order with timestamps, supports start/end times and frame stride, and defaults to the fight window (`action_start_s` / `action_end_s`).
+2. PySceneDetect shot boundaries saved to `data/cache/<fight_id>_shots.json` via `deepfoul extract --shots <fight_id>`, only inside the fight window. Tracks reset at cuts.
+3. Run it on 2 train fights (one foul fight, one clean fight).
+4. Contact sheet of 20 detected cuts (the frame before and after each cut) in `outputs/shots_check/`.
+5. **Golden candidate clips:** for every `clear_live` foul in `labels/notes/known_fouls.csv` from a **train** fight, cut a short preview clip (5 s before to 5 s after the live time) into `outputs/golden_candidates/`, named `<fight_id>_<mm-ss>_<foul_type>.mp4`. These are previews only, never committed.
+
+**Done when**
+- Shot files exist for 2 fights, and the cut contact sheet and golden candidate clips are ready.
+
+**You do**
+1. Look at the cut contact sheet. Each pair should be two different camera angles. Note any fake cuts (same angle) or obvious missed cuts.
+2. **Pick the golden set** (10 to 30 s each, live speed, train fights only, no replays). Times are from the original video, as VLC shows them.
+   1. **Eye poke:** watch the poke previews in `outputs/golden_candidates/`. Best bets: Munhoz vs O'Malley (12:07) or Battle vs Loosa (08:09).
+   2. **Low blow:** Holland vs Malott (05:02 or 05:52).
+   3. **Clean stand-up exchange**, both fighters fully visible: O'Malley vs Vera or Magomedov vs Petrosyan.
+   4. **Clinch against the cage:** Barber vs Grasso, or any train fight.
+   5. **Ref stepping in** between the fighters (a break or a stoppage): any train fight.
+   6. **(Bonus) women's stand-up exchange:** Barber vs Grasso.
+   Don't use Edwards vs Muhammad or Garbrandt vs Long (video quality), or any val or test fight.
+   Format: `1. ufc276_munhoz_omalley 11:55-12:20 eye poke`
+3. Paste the cut issues and the golden list into the 1.2 kickoff prompt.
+
+---
+
 ## How every section works
 
 Work is sequential: Claude Code finishes its part, then Ari does his. Nothing runs at the same time.
@@ -17,7 +49,7 @@ Work is sequential: Claude Code finishes its part, then Ari does his. Nothing ru
 - **Ari**: logins, approvals, watching footage, judgment calls and **all labeling**. Ground truth must come from a human, never from Claude.
 
 **Rules of thumb for Ari:**
-- **Never hand-edit CSVs** (except reviewing the Cowork draft in 0.2). Give the information to Claude Code in the next kickoff prompt, or as a reply at a pause point, and it writes the file. The labeling app writes `events.csv`.
+- **Never hand-edit CSVs** (except reviewing Cowork drafts). Give the information to Claude Code in the next kickoff prompt, or as a reply at a pause point, and it writes the file. The labeling app writes `events.csv`.
 - **Watch footage in VLC** (or any player that shows exact times). When you note a moment, write it as `fight_id mm:ss` (e.g. `ufc276_omalley_munhoz 03:41`).
 - **The standard kickoff prompt** is: `Read CLAUDE.md, ROADMAP.md and PROGRESS.md. Plan section X.Y only. Wait for my approval before writing code.` Sections add extra lines when needed.
 
@@ -62,86 +94,11 @@ Variety: at least 2 women's fights, at least 1 fight with similar or dark shorts
 
 ---
 
-## Phase 0: Setup
-
-### 0.1 Repo and environment ✅ Done (RTX 2080)
-Built: uv project, `deepfoul doctor`, `deepfoul fetch`, `deepfoul pose-check`, label CSV headers, 10 tests, machine setup, attribution off, noreply git email. See PROGRESS.md for details.
-
-### 0.2 Starter fights: review, merge, download
-
-**Before the session: Cowork + you**
-1. Cowork research is done (`labels/fights_starter.csv` + `labels/fights_starter_notes.md`).
-2. Read `fights_starter_notes.md`. For each foul fight, open the video link and jump to the foul (round/time from the notes). Make sure:
-   - the foul is actually visible on camera
-   - the video is the full fight, at normal speed, from the official UFC channel
-3. Decide what to swap or drop. You can either edit `fights_starter.csv` directly (this is the one CSV you touch) or list the changes in the kickoff prompt.
-4. Check the buckets still add up (test / foul / clean, splits, variety rules). If a bucket is short, ask Cowork for replacements first.
-
-**Kickoff prompt**
-```
-Read CLAUDE.md, ROADMAP.md and PROGRESS.md. Plan section 0.2 only. Wait for my approval before writing code.
-I've reviewed labels/fights_starter.csv. Changes: <list them, or "none">.
-```
-
-**Claude Code does**
-1. Validate `fights_starter.csv`: unique `fight_id`s in the right format, valid `split` values, valid dates, and URLs that are official UFC YouTube links (or blank). Report any problems and **pause** for Ari to decide.
-2. Add the `action_start_s` / `action_end_s` columns to `fights.csv` (see CLAUDE.md), merge the rows in with those columns blank, delete `fights_starter.csv`, and move the notes to `labels/notes/starter_fights.md`. Commit (metadata only).
-3. Run `deepfoul fetch` on every row with a URL. This can take a while, since each full fight is a few hundred MB.
-4. Check every download with `ffprobe` (duration, resolution, fps) and flag files that look wrong: much shorter or longer than a full fight, under 720p, or a variable frame rate.
-5. Make a contact sheet per fight (frames at 10%, 50% and 90% of the video) in `outputs/fetch_check/`.
-6. Write `outputs/fetch_check/report.md`: one row per fight with status (downloaded / failed / no URL), duration, resolution, flags and the contact sheet path.
-
-**Done when**
-- Every row with a URL is either downloaded or listed as failed with the error.
-- The report and contact sheets exist.
-
-**You do**
-1. Open `outputs/fetch_check/report.md`.
-2. Look at each contact sheet (5 seconds each): is it the right fighters, the full broadcast, and no overlays?
-3. For any flagged or failed fight, open the video in VLC and decide: keep it, find a new URL (Cowork), or drop it.
-4. **Mark the fight window for every downloaded fight.** Don't trim anything. Open each video in VLC and note two times:
-   - when round 1 actually starts (the first touch of gloves or the ref saying "fight")
-   - when the fight ends (the stoppage, or the final bell for a decision)
-   Format: `ufc276_omalley_munhoz 01:12-12:40`. This takes about a minute per fight: drag the scrubber, don't watch it all.
-5. Give the fight windows and any fight changes to Claude Code in the 1.1 kickoff prompt, or start a quick fix session if a lot failed.
-
-**Send to chat:** the report summary (downloaded / failed / no URL counts per bucket).
-
 ---
 
 ## Phase 1: Perception pipeline (the "eyes")
 
-### 1.1 Video IO and shot detection
-
-**Kickoff prompt**
-```
-Read CLAUDE.md, ROADMAP.md and PROGRESS.md. Plan section 1.1 only. Wait for my approval before writing code.
-Fight windows (write these to action_start_s / action_end_s in labels/fights.csv first):
-<paste your fight windows>
-Fight list fixes from 0.2: <list or "none">.
-```
-
-**Claude Code does**
-1. Write the fight windows to `fights.csv` (converting mm:ss to seconds) and apply any fight list fixes.
-2. Frame reader: yields frames in order with timestamps, supports start/end times and frame stride.
-3. PySceneDetect shot boundaries saved to `data/cache/<fight_id>_shots.json` via `deepfoul extract --shots <fight_id>`, only inside the fight window. Tracks reset at cuts.
-4. Run it on 2 train fights.
-5. Contact sheet of 20 detected cuts (the frame before and after each cut) in `outputs/shots_check/`.
-
-**Done when**
-- Shot files exist for 2 fights, and the contact sheet is ready.
-
-**You do**
-1. Look at the cut contact sheet. Each pair should be two different camera angles. Note any fake cuts (same angle) or obvious missed cuts.
-2. **Pick the golden set.** Watch train fights only (not test) in VLC and write down start and end times for 10 to 30 s clips at live speed (no replays):
-   1. Clean stand-up exchange, both fighters fully visible
-   2. Clinch against the cage
-   3. Ref stepping in between the fighters (a break or a stoppage)
-   4. A clear eye poke
-   5. A clear low blow
-   6. (Bonus) a stand-up exchange from a women's fight
-   Format: `1. ufc276_omalley_munhoz 02:10-02:35 clean exchange` (times from the original video, same as VLC shows)
-3. Paste the cut issues and the golden list into the 1.2 kickoff prompt.
+1.1 is in progress (see **Now** at the top).
 
 ### 1.2 Detection and tracking
 
@@ -315,7 +272,7 @@ Targets before Phase 5:
 
 **One round:**
 1. **Cowork:** "Find 5 to 10 more UFC full fights with documented eye pokes or low blows (plus 1 to 2 compilations), following the Footage guide in ROADMAP.md. Write them to `labels/fights_draft.csv` with the same columns as fights.csv, plus a notes file."
-2. **You:** review the draft the same way as in 0.2 (foul visible, full fight, official upload), and note each fight's window (`fight_id mm:ss-mm:ss`).
+2. **You:** review the draft like the starter list: foul visible, full fight, normal speed, official upload if possible. Note each fight's window (`fight_id mm:ss-mm:ss`) and every foul (time, type, offender, clear live or only in replay).
 3. **Claude Code** (short session): `Run deepfoul ingest on labels/fights_draft.csv with these fight windows: <paste>. Show me the ingest report.` For a big batch, run `uv run deepfoul ingest` yourself overnight instead.
 4. **You:** label the new queues:
    - `uv run deepfoul label --queue mined`
@@ -552,6 +509,16 @@ Demo moments: <your 3 picks>.
 1. Read the README start to finish and check the numbers.
 
 **Send to chat:** the README + results. Together we write the X thread and the Jabbr pitch email (the ask: a paid trial project). Then you post the thread and send the email from ari@ar13.dev.
+
+---
+
+## Done
+
+### 0.1 Repo and environment ✅
+uv project, `deepfoul doctor` / `fetch` / `pose-check`, label CSV headers, machine setup on the RTX 2080 (SAC off, `UV_PYTHON_INSTALL_DIR`), attribution off, noreply git email. Details in PROGRESS.md.
+
+### 0.2 Starter fights ✅
+15 fights in `labels/fights.csv` with fight windows (train 9 / val 4 / test 2), all downloaded. Known fouls in `labels/notes/known_fouls.csv` and `labels/notes/starter_fights.md`. `deepfoul fetch-check` writes `outputs/fetch_check/report.md` plus contact sheets. After 0.2, Kape vs Silva and Garbrandt vs Long swapped splits (Garbrandt's video is cropped and likely frame-interpolated, so it's in train now). Val = Cortes Acosta vs Delija, Kape vs Silva, Gaethje vs Holloway, Garry vs Prates.
 
 ---
 
