@@ -5,7 +5,7 @@ Claude Code updates this file at the end of every ROADMAP section. Newest entrie
 ## Current status
 | Phase | Section | Status |
 |---|---|---|
-| 0 | 0.1 Repo and environment | Done on RTX 2080; 4090 doctor check pending |
+| 0 | 0.1 Repo and environment | Done (RTX 2080) |
 | 1 | 1.1 Video IO and shot detection | Not started |
 | 1 | 1.2 Detection and tracking | Not started |
 | 1 | 1.3 Identity: ref filter and red/blue | Not started |
@@ -28,15 +28,24 @@ Claude Code updates this file at the end of every ROADMAP section. Newest entrie
 | 7 | 7.1 Repo polish | Not started |
 
 ## Key numbers
-- Pipeline speed (fps on 4090): -
+- Pipeline speed (fps on RTX 2080): -
 - Labeled positives: eye_poke - / low_blow - / open_hand -
 - Fights: train - / val - / test -
 - Best val metrics: -
 - Test metrics: -
 
 ## Open issues
-- Run `uv run deepfoul doctor` on the 4090 PC (needs a driver new enough for CUDA 13). If CUDA fails there, pin onnxruntime-gpu to its CUDA 12 build before anything else.
 - openmmlab's model server throttles to ~100 KB/s per connection. On a new machine, pre-download the two model zips from rtmlib's Hugging Face mirror (see the 0.1 log entry).
+
+## Switching machines (later, not now)
+All work is on the RTX 2080 PC for now. When Ari moves to the 4090 PC (or any new Windows PC):
+1. Turn off Smart App Control if it's on (it blocks unsigned DLLs).
+2. Set user env var `UV_PYTHON_INSTALL_DIR=C:\Users\AriSh\.uv-python`.
+3. Install uv, ffmpeg, yt-dlp and gh via winget; `gh auth login`.
+4. `git clone` / `git pull`, then `uv sync`.
+5. Pre-download the rtmlib model zips from the Hugging Face mirror (see the 0.1 log entry).
+6. `uv run deepfoul doctor` must show `CUDAExecutionProvider` active. If it fails, pin onnxruntime-gpu to its CUDA 12 build before anything else.
+7. `deepfoul fetch` to rebuild `data/raw/` from `labels/fights.csv`.
 
 ## Log
 
@@ -70,21 +79,20 @@ Claude Code updates this file at the end of every ROADMAP section. Newest entrie
 - `deepfoul fetch` on a scratch one-row CSV downloaded Stirling vs Blachowicz (UFC official channel, 1080p30, 4:40) to `data/raw/`. A re-run skipped it.
 - `deepfoul pose-check` on a frame at 1:30: det and pose both on `CUDAExecutionProvider`, 2 people, keypoints (2, 133, 2). Skeleton image checked by eye: body, hands, face and feet all line up. The ref (partly hidden) was not detected; that's for 1.2.
 - `git status` after the download shows nothing under `data/` or `outputs/`. `uv run pytest`: 10 passed.
-- Not done: the 4090 doctor check (still open). No YouTube JS runtime (Deno) was needed.
+- No YouTube JS runtime (Deno) was needed.
 
 **Golden set:** n/a (no golden set yet).
 
 **Known issues / machine notes:**
-- **Smart App Control** blocked unsigned DLLs (uv Python's OpenSSL, `onnx`, the `deepfoul.exe` launcher). Ari turned SAC off on the 2080 PC. Expect the same on the 4090 and other Windows PCs if SAC is on.
-- **Claude desktop app redirects `AppData\Roaming`** for processes it starts, so uv's Python landed in the app's private folder and the venv didn't work from Ari's own terminal. Fix: user env var `UV_PYTHON_INSTALL_DIR=C:\Users\AriSh\.uv-python`, then reinstall 3.11 and rebuild `.venv`. Do the same on the 4090 PC.
+- **Smart App Control** blocked unsigned DLLs (uv Python's OpenSSL, `onnx`, the `deepfoul.exe` launcher). Ari turned SAC off on the 2080 PC. Expect the same on any other Windows PC with SAC on.
+- **Claude desktop app redirects `AppData\Roaming`** for processes it starts, so uv's Python landed in the app's private folder and the venv didn't work from Ari's own terminal. Fix: user env var `UV_PYTHON_INSTALL_DIR=C:\Users\AriSh\.uv-python`, then reinstall 3.11 and rebuild `.venv`. Needed on any Windows PC used through the Claude desktop app.
 - Model download: openmmlab is ~100 KB/s. The maintainer's mirror `huggingface.co/Tau-J/RTMPose` has the same files (sizes and sampled byte ranges checked against openmmlab). Put the zips in `~/.cache/rtmlib/hub/checkpoints/` and rtmlib unpacks them on first use.
 - Leftovers from the first (redirected) Python install: `C:\Users\AriSh\.local\bin\python3.11.exe` and a copy under the Claude app's LocalCache. Both are unused and safe to delete.
 - `labels/fights_starter.csv` and `fights_starter_notes.md` appeared during this session. They weren't made here (they look like the starter-list research), so they're left uncommitted for Ari to review.
 
 **Next:**
-- Ari: run `gh auth login`, create `ar1shah/deepfoul`, then push.
+- Ari ran `gh auth login`: create `ar1shah/deepfoul` and push.
 - Ari: review the starter fight list.
-- On the 4090 PC: `git pull`, set `UV_PYTHON_INSTALL_DIR`, `uv sync`, `uv run deepfoul doctor`.
 - Then section 1.1 (video IO and shot detection).
 
 <!--
