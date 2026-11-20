@@ -312,20 +312,68 @@ def split_segments(labels: list[str], split_frames: int) -> list[int]:
 
 
 def smooth_track(frames: list[int], labels: list[str], fps: float, cfg: dict) -> list[str]:
-    """Majority label within the same segment over [t - smooth_s, t + smooth_s]."""
+    """Majority label within the same segment over [t - smooth_s, t + smooth_s].
+
+    Ties go to the box's own label if it is among the winners, else to the winner that occurs
+    first in the window. Sliding window, O(n) per tracklet (frames must be ascending).
+    """
+    from bisect import bisect_left
+
     sm = cfg["smooth"]
     w = sm["smooth_s"] * fps
     segs = split_segments(labels, sm["split_frames"])
+    n = len(frames)
+    pos: dict[str, list[int]] = {}
+    for j, lab in enumerate(labels):
+        pos.setdefault(lab, []).append(j)
+    counts: dict[str, int] = {}
+    lo = hi = 0
     out = []
-    for i, (f, s) in enumerate(zip(frames, segs)):
-        votes: dict[str, int] = {}
-        for j in range(len(frames)):
-            if segs[j] == s and abs(frames[j] - f) <= w:
-                votes[labels[j]] = votes.get(labels[j], 0) + 1
-        top = max(votes.values())
-        winners = [k for k, v in votes.items() if v == top]
-        out.append(labels[i] if labels[i] in winners else winners[0])
+    for i in range(n):
+        while hi < n and segs[hi] == segs[i] and frames[hi] - frames[i] <= w:
+            counts[labels[hi]] = counts.get(labels[hi], 0) + 1
+            hi += 1
+        while segs[lo] != segs[i] or frames[i] - frames[lo] > w:
+            counts[labels[lo]] -= 1
+            lo += 1
+        top = max(counts.values())
+        winners = [k for k, v in counts.items() if v == top]
+        if labels[i] in winners:
+            out.append(labels[i])
+        else:
+            out.append(min(winners, key=lambda k: pos[k][bisect_left(pos[k], lo)]))
     return out
+
+
+def weak_corner_guard(df, ac: dict):
+    """Leave a corner empty rather than give it to a box that matches it weakly.
+
+    A red/blue box becomes 'none' when all hold:
+      - its own corner cost is above `weak_corner_cost` and above its ref cost (it looks more
+        like a clothed person: a seated official, crowd behind the fence),
+      - it is shorter than `weak_corner_max_rel_height` x the tallest box in the frame,
+      - its tracklet never matched this corner with a cost under `weak_corner_trusted_cost`
+        earlier (past only). A fighter crumpled on the mat after a knockdown looks just as
+        clothed and ref-like for a moment, but was confidently that fighter before.
+    Runs before `apply_merges`, so a freed corner can still become 'merged'.
+    """
+    thr = ac.get("weak_corner_cost")
+    if thr is None or df.empty or "cost_ref" not in df:
+        return df
+    own = df["cost_red"].where(df["label"] == "red", df["cost_blue"])
+    h = df["y2"] - df["y1"]
+    rel = h / h.groupby(df["frame_idx"]).transform("max")
+    weak = (df["label"].isin(["red", "blue"]) & (own > thr) & (own > df["cost_ref"])
+            & (rel < ac.get("weak_corner_max_rel_height", 1.0)))
+    trusted = ac.get("weak_corner_trusted_cost")
+    if trusted is not None and "track_id" in df:
+        for c in ("red", "blue"):
+            good = (df["track_id"] != "") & (df[f"cost_{c}"] < trusted)
+            first = df.loc[good].groupby("track_id")["frame_idx"].min()
+            since = df["track_id"].map(first)
+            weak &= ~((df["label"] == c) & since.notna() & (since <= df["frame_idx"]))
+    df.loc[weak, "label"] = "none"
+    return df
 
 
 def smooth_labels(df, fps: float, cfg: dict):
@@ -339,12 +387,12 @@ def smooth_labels(df, fps: float, cfg: dict):
         g = g.sort_values("frame_idx")
         df.loc[g.index, "label"] = smooth_track(g["frame_idx"].tolist(), g["raw_label"].tolist(),
                                                 fps, cfg)
-    for _, g in df.groupby("frame_idx"):
-        for lab in ("red", "blue", "ref", "merged"):
-            dup = g[g["label"] == lab]
-            if len(dup) > 1:
-                keep = dup["cost"].fillna(9.0).idxmin()
-                df.loc[[i for i in dup.index if i != keep], "label"] = "none"
+    cost = df["cost"].fillna(9.0)
+    for lab in ("red", "blue", "ref", "merged"):
+        m = df["label"] == lab
+        keep = cost[m].groupby(df.loc[m, "frame_idx"]).idxmin()
+        df.loc[m & ~df.index.isin(keep.values), "label"] = "none"
+    df = weak_corner_guard(df, cfg["assign"])
     df = apply_merges(df, fps, cfg["assign"])
     # fighters are among the big people in frame; a small red/blue box is crowd or crew
     h = df["y2"] - df["y1"]

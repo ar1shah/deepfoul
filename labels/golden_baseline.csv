@@ -1,0 +1,10 @@
+clip_id,both_pct,both_or_merged_pct,corner_jumps,status,known_issue,fix_section
+golden_01,68,71,4,pass,low by design: ref close-up 08:16-08:19 and shot 38 with one fighter out of frame,
+golden_02,81,84,0,pass,,
+golden_03,87,98,1,pass,,
+golden_04,11,93,3,known_fail,"clinch: wide pair box labelled BLUE + a fragment labelled RED instead of one merged box (14:03.8); 1.3 also had seated officials RED at 13:58.6 and 14:15.5, cleared by the 1.4 weak-corner guard",4.1
+golden_05,91,96,0,pass,,
+golden_06,90,97,0,pass,,
+check_01,90,98,0,pass,,
+check_02,60,98,2,pass,ground: tangled pairs are merged by design,
+check_03,64,93,7,pass,ground: tangled pairs are merged by design; a few crowd-behind-fence frames remain,

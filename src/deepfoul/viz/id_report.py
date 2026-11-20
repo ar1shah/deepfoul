@@ -1,4 +1,5 @@
-"""outputs/renders/1.3/report.md: per-clip identity stats, Ari's 1.2 issues, profile warnings."""
+"""outputs/renders/<section>/report.md: per-clip identity stats vs the golden baseline, Ari's 1.2
+issues, profile warnings."""
 
 from __future__ import annotations
 
@@ -10,17 +11,47 @@ from deepfoul.io.previews import fmt_ts
 from deepfoul.perception.identity import iou
 
 JUMP_IOU = 0.3   # a corner label moving to a box with IoU below this vs last frame = a jump
+# Golden baseline (labels/golden_baseline.csv): a clip regresses when "both or merged" drops more
+# than this many points, or it gains more than this many corner jumps.
+REGRESS_BOM_PTS = 3.0
+REGRESS_JUMPS = 2
+FIXED_MAX_JUMPS = 2   # a known failure with at most this many jumps might be fixed: check by eye
 
 
-def label_jumps(ident: pd.DataFrame, labels=("red", "blue")) -> pd.DataFrame:
-    """Frames where a corner label moves to a different-looking box within a shot."""
+def read_baseline(path: Path) -> dict[str, dict]:
+    import csv
+
+    if not path.exists():
+        return {}
+    with path.open(encoding="utf-8-sig", newline="") as f:
+        return {r["clip_id"]: r for r in csv.DictReader(f)}
+
+
+def baseline_verdict(s: dict, b: dict | None) -> str:
+    """ok | REGRESSION | known fail (<section>) | FIXED? check by eye | no baseline."""
+    if b is None:
+        return "no baseline"
+    worse = (s["both_or_merged_pct"] < float(b["both_or_merged_pct"]) - REGRESS_BOM_PTS
+             or s["flips"] > int(b["corner_jumps"]) + REGRESS_JUMPS)
+    if worse:
+        return "REGRESSION"
+    if b["status"] == "known_fail":
+        if s["flips"] <= FIXED_MAX_JUMPS:
+            return "FIXED? check by eye"
+        return f"known fail ({b['fix_section']})"
+    return "ok"
+
+
+def label_jumps(ident: pd.DataFrame, labels=("red", "blue"), step: int = 1) -> pd.DataFrame:
+    """Frames where a corner label moves to a different-looking box within a shot (between
+    consecutive processed frames, `step` apart)."""
     rows = []
     for lab in labels:
         d = ident[ident["label"] == lab].sort_values("frame_idx")
         prev = None
         for r in d.itertuples():
             box = (r.x1, r.y1, r.x2, r.y2)
-            if (prev is not None and prev[0] == r.frame_idx - 1 and prev[1] == r.shot_id
+            if (prev is not None and prev[0] == r.frame_idx - step and prev[1] == r.shot_id
                     and iou(prev[2], box) < JUMP_IOU):
                 rows.append({"frame_idx": r.frame_idx, "t": r.t, "label": lab})
             prev = (r.frame_idx, r.shot_id, box)
@@ -49,9 +80,9 @@ def frame_table(tracks: pd.DataFrame, ident: pd.DataFrame) -> pd.DataFrame:
 
 
 def clip_identity_summary(clip_id, fight_id, start_s, end_s, note, tracks, ident, fps, timing,
-                          render) -> dict:
+                          render, step: int = 1) -> dict:
     fr = frame_table(tracks, ident)
-    jumps = (label_jumps(ident) if not ident.empty
+    jumps = (label_jumps(ident, step=step) if not ident.empty
              else pd.DataFrame(columns=["frame_idx", "t", "label"]))
     n = len(fr)
     both = (fr["red"] > 0) & (fr["blue"] > 0)
@@ -95,8 +126,10 @@ def issue_rows(summaries: list[dict], checks: list[dict]) -> list[str]:
 
 
 def write_id_report(summaries: list[dict], profiles: dict, fights: dict, path: Path, gpu: str,
-                    checks: list[dict] | None = None) -> None:
-    lines = ["# Identity check (1.3)", "", f"GPU: {gpu}.", "",
+                    checks: list[dict] | None = None, baseline: dict | None = None,
+                    title: str = "Identity check") -> None:
+    baseline = baseline or {}
+    lines = [f"# {title}", "", f"GPU: {gpu}.", "",
              "Labels come from matching each kept box against the fight's profiles (shorts colors "
              "for red/blue, clothed shins + ref clothing for the ref), smoothed within ByteTrack "
              "tracklets. **both** = frames with a red and a blue box. **jumps** = a corner label "
@@ -104,8 +137,8 @@ def write_id_report(summaries: list[dict], profiles: dict, fights: dict, path: P
              "**ref missed** = both fighters found and an unlabelled box with clothed legs, but no "
              "ref. Renders draw nothing on the ref (use `--show-ref`).", "",
              "| clip | fight | span | frames | both | both or merged | jumps | ref frames | "
-             "ref missed | merged | none boxes | det+pose fps |",
-             "|---|---|---|---|---|---|---|---|---|---|---|---|"]
+             "ref missed | merged | none boxes | det+pose fps | vs baseline |",
+             "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for s in summaries:
         name = f"[{s['clip_id']}]({s['render']})" if s["render"] else s["clip_id"]
         t = s["timing"]
@@ -113,7 +146,15 @@ def write_id_report(summaries: list[dict], profiles: dict, fights: dict, path: P
         lines.append(f"| {name} | {s['fight_id']} | {fmt_ts(s['start_s'])}-{fmt_ts(s['end_s'])} | "
                      f"{s['frames']} | {s['both_pct']:.0f}% | {s['both_or_merged_pct']:.0f}% | "
                      f"{s['flips']} | {s['ref_frames']} | {s['ref_missed']} | "
-                     f"{s['merged_frames']} | {s['none_boxes']} | {fps} |")
+                     f"{s['merged_frames']} | {s['none_boxes']} | {fps} | "
+                     f"{baseline_verdict(s, baseline.get(s['clip_id']))} |")
+    known = [b for b in baseline.values() if b["status"] == "known_fail"]
+    if baseline:
+        lines += ["", f"**vs baseline** (`labels/golden_baseline.csv`): REGRESSION = both or merged "
+                  f"down more than {REGRESS_BOM_PTS:.0f} points or more than {REGRESS_JUMPS} extra "
+                  "jumps. Known failures: "
+                  + ("; ".join(f"{b['clip_id']} ({b['fix_section']}): {b['known_issue']}"
+                               for b in known) or "none") + "."]
     if checks:
         lines += ["", "## Ari's 1.2 issues, now", "",
                   "Within +-1.5 s of each time: share of frames with a red / blue box, a merged "
@@ -133,7 +174,7 @@ def write_id_report(summaries: list[dict], profiles: dict, fights: dict, path: P
     if timed:
         fr = sum(t["frames"] for t in timed)
         det, pose, wall = (sum(t[k] for t in timed) for k in ("det_s", "pose_s", "wall_s"))
-        boxes = sum(t["pose_boxes"] for t in timed)
+        boxes = sum(t.get("boxes", t.get("pose_boxes", 0)) for t in timed)
         lines += ["", "## Speed", "",
                   f"{fr} frames: detection {fr / det:.1f} fps, pose {fr / pose:.1f} fps "
                   f"({boxes / fr:.1f} kept boxes per frame), whole GPU pass incl. decode and "

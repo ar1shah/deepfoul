@@ -137,6 +137,13 @@ identity:
     ref_clothed_weight: 0.6
     ref_profile_weight: 0.4
     fighter_min_rel_height: 0.35  # red/blue boxes shorter than this x the tallest box -> none
+    # Weak-corner guard (1.4): a red/blue box costing more than weak_corner_cost AND more than as
+    # ref, shorter than weak_corner_max_rel_height x the tallest box, whose tracklet never matched
+    # that corner under weak_corner_trusted_cost before -> none (seated officials, crowd behind
+    # the fence). weak_corner_cost: null disables it.
+    weak_corner_cost: 0.3
+    weak_corner_max_rel_height: 0.7
+    weak_corner_trusted_cost: 0.25
     merge_aspect_min: 0.45    # box width / height for a merged clinch box
     merge_contain_min: 0.7    # the other fighter's box this much inside the wide box = a fragment
     merge_memory_s: 0.5       # the other fighter's last box must be this recent ...
@@ -144,6 +151,12 @@ identity:
   smooth:
     smooth_s: 0.5             # majority vote within a tracklet over t +- smooth_s
     split_frames: 8           # a new label holding this long splits the tracklet (ID swap)
+
+# Full-fight extraction, 1.4: one in-order pass -> data/keypoints/<fight_id>.parquet.
+extract:
+  target_fps: 30            # take every round(fps / target_fps)-th frame (60 and 50 fps -> 2)
+  chunk_s: 60               # resume unit: whole shots grouped into parts of about this long
+  describe_workers: 3       # CPU threads for color descriptors, overlapping the GPU (0 = in-line)
 
 pose:
   batch: true                 # one ONNX call per frame when the model allows it
