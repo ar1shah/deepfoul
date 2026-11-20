@@ -465,5 +465,114 @@ def _shorts_report(cfg: dict, out_dir: Path) -> None:
     typer.echo(f"report -> {out_dir / 'report.md'}")
 
 
+@app.command("id-golden")
+def id_golden(
+    only: list[str] = typer.Option(None, "--only", help="Only these golden event_ids / check_ids."),
+    from_cache: bool = typer.Option(False, "--from-cache",
+                                    help="Reuse cached tracks + pose (no GPU work)."),
+    no_render: bool = typer.Option(False, "--no-render", help="Skip the videos."),
+    show_ref: bool = typer.Option(False, "--show-ref", help="Draw a thin labelled box on the ref."),
+    rebuild_profiles: bool = typer.Option(False, "--rebuild-profiles",
+                                          help="Re-learn the fight profiles."),
+    no_checks: bool = typer.Option(False, "--no-checks", help="Skip the extra check spans."),
+) -> None:
+    """Detect + track + pose + red/blue/ref identity on every golden clip (and the checks).
+
+    Renders to outputs/renders/1.3/ (with --show-ref: outputs/renders/1.3/show_ref/), caches to
+    data/cache/identity/, writes outputs/renders/1.3/report.md.
+    """
+    import csv
+    import json
+
+    from deepfoul.io.fetch import read_fights
+    from deepfoul.io.shots import load_shots, shots_path
+    from deepfoul.perception.id_clip import (get_profile, identify_clip, load_pose,
+                                             render_identity, save_pose, track_pose_clip)
+    from deepfoul.perception.identity import check_lookahead
+    from deepfoul.viz.id_report import clip_identity_summary, write_id_report
+
+    cfg = load_config()
+    detector = pose = None
+    gpu, vram = _gpu_info()
+    if not from_cache or rebuild_profiles:
+        from deepfoul.perception.detect import PersonDetector
+        from deepfoul.perception.pose import PoseEstimator
+
+        _init_ort()
+        mode = cfg["profiles"][pick_profile(cfg, vram)]["pose_mode"]
+        device = cfg["device"] if cfg["device"] != "auto" else ("cuda" if gpu else "cpu")
+        detector = PersonDetector(mode, device, cfg["det"]["score_min"])
+        pose = PoseEstimator(mode, device, cfg["pose"]["batch"])
+        typer.echo(f"detector + pose ({mode}) on {detector.providers[0]} / {pose.providers[0]}, "
+                   f"pose batched: {pose.batched}")
+
+    fights = {r["fight_id"].strip(): r for r in read_fights(cfg["paths"]["labels"] / "fights.csv")}
+    with (cfg["paths"]["labels"] / "golden.csv").open(encoding="utf-8-sig", newline="") as f:
+        jobs = [(g["event_id"], g["fight_id"], float(g["start_s"]), float(g["end_s"]),
+                 f"{g['foul_type']}: {g['notes']}", True) for g in csv.DictReader(f)]
+    if not no_checks:
+        jobs += [(c["check_id"], c["fight_id"], float(c["start_s"]), float(c["end_s"]),
+                  c.get("note", "extra check"), False) for c in cfg["tracking"]["checks"]]
+    if only:
+        jobs = [j for j in jobs if j[0] in only]
+
+    out_dir = cfg["paths"]["outputs"] / "renders" / "1.3"
+    cache_dir = cfg["paths"]["cache"] / "identity"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    profiles, summaries = {}, []
+    for clip_id, fid, start, end, note, golden in jobs:
+        row = fights[fid]
+        doc = load_shots(shots_path(cfg["paths"]["cache"], fid))
+        fps = doc["fps"]
+        check_lookahead(cfg["identity"], fps, cfg["lookahead_s"])
+        if fid not in profiles:
+            profiles[fid] = get_profile(row, cfg, detector, pose, cfg["paths"]["raw"], cache_dir,
+                                        fps, rebuild_profiles)
+            p = profiles[fid]
+            typer.echo(f"{fid}: profile from {p.n} teaching frames"
+                       + "".join(f"\n  WARNING {w}" for w in p.warnings))
+        tracks_path = cache_dir / f"{clip_id}_tracks.parquet"
+        pose_path = cache_dir / f"{clip_id}_pose.npz"
+        timing_path = cache_dir / f"{clip_id}_timing.json"
+        timing = None
+        if from_cache:
+            if not tracks_path.exists():
+                typer.secho(f"{clip_id}: no cache, run without --from-cache", fg="red")
+                continue
+            tracks = pd_read(tracks_path)
+            if timing_path.exists():
+                timing = json.loads(timing_path.read_text())
+        else:
+            tracks, _, (pf, pdi, pk, ps), timing = track_pose_clip(
+                row, start, end, doc["shots"], fps, detector, pose, cfg, cfg["paths"]["raw"])
+            tracks.to_parquet(tracks_path, index=False)
+            save_pose(pose_path, pf, pdi, pk, ps)
+            timing_path.write_text(json.dumps(timing))
+        ident = identify_clip(row, start, end, tracks, load_pose(pose_path), profiles[fid], cfg,
+                              cfg["paths"]["raw"], fps)
+        ident.to_parquet(cache_dir / f"{clip_id}_identity.parquet", index=False)
+        kind = note.split(":")[0].replace(" ", "_")
+        render = None
+        if golden and not no_render:
+            render = (out_dir / "show_ref" if show_ref else out_dir) / f"{clip_id}_{fid}_{kind}.mp4"
+            render_identity(row, start, end, tracks, ident, cfg["paths"]["raw"], render, show_ref)
+        s = clip_identity_summary(clip_id, fid, start, end, note, tracks, ident, fps, timing,
+                                  render.relative_to(out_dir).as_posix() if render else None)
+        summaries.append(s)
+        typer.echo(f"{clip_id}: both fighters {s['both_pct']:.0f}% of frames, "
+                   f"flips {s['flips']}, ref {s['ref_frames']}, merged {s['merged_frames']}"
+                   + (f", det+pose {timing['frames'] / timing['wall_s']:.1f} fps" if timing else ""))
+    report = out_dir / "report.md"
+    write_id_report(summaries, profiles, fights, report, f"{gpu} ({vram} GB)" if gpu else "none",
+                    cfg["identity_issue_checks"])
+    typer.echo(f"report -> {report}")
+
+
+def pd_read(path):
+    import pandas as pd
+
+    return pd.read_parquet(path)
+
+
 if __name__ == "__main__":
     app()
