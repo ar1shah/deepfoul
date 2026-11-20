@@ -181,7 +181,8 @@ def extract(
     import time
 
     from deepfoul.io.fights import window
-    from deepfoul.io.shots import detect_shots, load_shots, save_shots, shots_path, stale_reason
+    from deepfoul.io.shots import (detect_shots, load_shots, save_shots, shots_cfg_for,
+                                   shots_path, stale_reason)
 
     if not shots:
         raise typer.BadParameter("nothing to do: pass --shots (pose extraction lands in 1.4)")
@@ -197,14 +198,15 @@ def extract(
         start, end = window(row)
         win = (start or 0.0, end)
         out = shots_path(cfg["paths"]["cache"], fid)
+        shots_cfg = shots_cfg_for(cfg["shots"], fid)
         if out.exists() and not force:
-            reason = stale_reason(load_shots(out), win, cfg["shots"])
+            reason = stale_reason(load_shots(out), win, shots_cfg)
             if reason is None:
                 typer.echo(f"{fid}: up to date ({out.name})")
                 continue
             typer.echo(f"{fid}: re-running, {reason}")
         t0 = time.perf_counter()
-        doc = {"fight_id": fid, **detect_shots(video, win[0], win[1], cfg["shots"])}
+        doc = {"fight_id": fid, **detect_shots(video, win[0], win[1], shots_cfg)}
         save_shots(doc, out)
         lens = [s["end_s"] - s["start_s"] for s in doc["shots"]]
         typer.echo(f"{fid}: {len(lens)} shots, median {sorted(lens)[len(lens) // 2]:.1f}s, "

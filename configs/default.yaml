@@ -38,9 +38,14 @@ fetch:
 # Shot (camera-cut) detection, 1.1. Changing these makes `extract --shots` re-run cached fights.
 shots:
   detector: adaptive        # PySceneDetect AdaptiveDetector
-  adaptive_threshold: 3.0   # score ratio vs rolling average needed for a cut
-  min_content_val: 15.0     # minimum raw content change for a cut
+  # Tuned in 1.1 (PySceneDetect defaults are 3.0 / 15). A lower ratio catches cuts in noisy
+  # re-uploads (Battle-Loosa); a higher absolute floor rejects duplicate-frame and
+  # compression-pulse fakes (Garbrandt-Long, Battle-Loosa). See PROGRESS.md 1.1.
+  adaptive_threshold: 2.0   # score ratio vs rolling average needed for a cut
+  min_content_val: 30.0     # minimum raw content change for a cut
   min_scene_len_s: 0.5      # converted to frames with each video's own fps
+  content_threshold: 27.0   # used when detector: content
+  per_fight: {}             # fight_id: {key: value} overrides for a bad video
 
 previews:
   golden_pad_s: 10          # golden candidate clips: live time +- this many seconds

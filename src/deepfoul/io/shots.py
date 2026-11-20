@@ -13,7 +13,7 @@ from bisect import bisect_right
 from pathlib import Path
 
 import scenedetect
-from scenedetect import AdaptiveDetector, SceneManager, open_video
+from scenedetect import AdaptiveDetector, ContentDetector, SceneManager, open_video
 
 
 def first_frame_at(t: float, fps: float) -> int:
@@ -21,15 +21,35 @@ def first_frame_at(t: float, fps: float) -> int:
     return max(0, math.ceil(t * fps - 1e-3 * fps))
 
 
+def shots_cfg_for(shots_cfg: dict, fight_id: str) -> dict:
+    """The shots config with this fight's `per_fight` overrides applied."""
+    base = {k: v for k, v in shots_cfg.items() if k != "per_fight"}
+    return {**base, **(shots_cfg.get("per_fight") or {}).get(fight_id, {})}
+
+
 def detector_params(shots_cfg: dict, fps: float) -> dict:
     """Detector name + params as used. min_scene_len_s is converted with this video's fps."""
-    return {
-        "name": shots_cfg["detector"],
-        "adaptive_threshold": float(shots_cfg["adaptive_threshold"]),
-        "min_content_val": float(shots_cfg["min_content_val"]),
-        "min_scene_len_s": float(shots_cfg["min_scene_len_s"]),
-        "min_scene_len_frames": max(1, round(shots_cfg["min_scene_len_s"] * fps)),
-    }
+    name = shots_cfg["detector"]
+    params = {"name": name}
+    if name == "adaptive":
+        params["adaptive_threshold"] = float(shots_cfg["adaptive_threshold"])
+        params["min_content_val"] = float(shots_cfg["min_content_val"])
+    elif name == "content":
+        params["content_threshold"] = float(shots_cfg["content_threshold"])
+    else:
+        raise ValueError(f"unknown shot detector {name!r}")
+    params["min_scene_len_s"] = float(shots_cfg["min_scene_len_s"])
+    params["min_scene_len_frames"] = max(1, round(shots_cfg["min_scene_len_s"] * fps))
+    return params
+
+
+def make_detector(params: dict):
+    if params["name"] == "adaptive":
+        return AdaptiveDetector(adaptive_threshold=params["adaptive_threshold"],
+                                min_scene_len=params["min_scene_len_frames"],
+                                min_content_val=params["min_content_val"])
+    return ContentDetector(threshold=params["content_threshold"],
+                           min_scene_len=params["min_scene_len_frames"])
 
 
 def shots_from_cuts(cut_frames: list[int], start_frame: int, end_frame: int,
@@ -48,15 +68,11 @@ def detect_shots(video: Path, start_s: float, end_s: float | None, shots_cfg: di
     Decodes from frame 0 (no seek) so PySceneDetect's frame numbers match the file exactly;
     cuts before start_s are dropped.
     """
-    if shots_cfg["detector"] != "adaptive":
-        raise ValueError(f"unknown shot detector {shots_cfg['detector']!r}")
     stream = open_video(str(video))
     fps = float(stream.frame_rate)
     params = detector_params(shots_cfg, fps)
     sm = SceneManager()
-    sm.add_detector(AdaptiveDetector(adaptive_threshold=params["adaptive_threshold"],
-                                     min_scene_len=params["min_scene_len_frames"],
-                                     min_content_val=params["min_content_val"]))
+    sm.add_detector(make_detector(params))
     sm.detect_scenes(stream, end_time=end_s)
     total = stream.duration.frame_num
     start_frame = first_frame_at(start_s, fps)

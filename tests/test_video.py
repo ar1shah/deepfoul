@@ -112,6 +112,19 @@ def test_cache_roundtrip_and_staleness(tmp_path):
     assert "window" in stale_reason(loaded, (5.0, None), SHOTS_CFG)
 
 
+def test_per_fight_override(video):
+    from deepfoul.io.shots import detector_params, shots_cfg_for
+
+    cfg = {**SHOTS_CFG, "content_threshold": 27.0, "per_fight": {"f1": {"detector": "content"}}}
+    assert shots_cfg_for(cfg, "f2")["detector"] == "adaptive"
+    c = shots_cfg_for(cfg, "f1")
+    assert detector_params(c, 25.0)["name"] == "content" and "per_fight" not in c
+    doc = detect_shots(video, 0.0, None, c)
+    assert all(abs(a - b) <= 1 for a, b in zip([s["start_frame"] for s in doc["shots"][1:]], CUTS))
+    with pytest.raises(ValueError):
+        detector_params({**SHOTS_CFG, "detector": "nope"}, 25.0)
+
+
 def test_labels_and_names():
     assert fmt_ts(727.48) == "12:07.48" and fmt_ts(0.0) == "00:00.00"
     assert fmt_ts(3725.5) == "62:05.50"
