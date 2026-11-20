@@ -56,7 +56,7 @@ Do not add AGPL or non-commercial dependencies (e.g. Ultralytics YOLO, OpenPose)
 1. Video in -> split into shots at camera cuts.
 2. Detect people -> track -> build per-fight color profiles -> drop the ref, crowd and cornermen -> assign `red` / `blue` corner.
 3. RTMW pose on each fighter's box -> 133 keypoints + confidence per frame.
-4. Cache keypoints to `data/keypoints/<fight_id>.parquet` so pose runs only once per video.
+4. Cache keypoints to `data/keypoints/<fight_id>.parquet` so pose runs only once per video: one row per kept box with its corner (`red|blue|ref|merged|none`), box, track, 133 keypoints + scores and color histograms. Identity re-runs from this cache (`deepfoul extract --from-cache`) without the GPU.
 
 **Training side**: stoppage finder (mines candidate foul moments), labeling app, dataset builder, model training, evaluation.
 
@@ -80,7 +80,7 @@ Do not add AGPL or non-commercial dependencies (e.g. Ultralytics YOLO, OpenPose)
 ## Data rules (important)
 - **Never trim, cut or re-encode the raw videos.** Every timestamp in the project is relative to the original downloaded file, so another machine running `deepfoul fetch` gets the exact same timeline. Skip unwanted footage with `action_start_s` / `action_end_s` instead.
 - `data/` and `outputs/` are gitignored. **Never commit video, clips, frames or downloaded footage.** Check `git status` before every commit.
-- What IS committed: `labels/fights.csv`, `labels/events.csv`, `labels/golden.csv` (metadata only: URLs, timestamps, labels) and trained model weights (via GitHub Releases, not the repo, if large).
+- What IS committed: `labels/fights.csv`, `labels/events.csv`, `labels/golden.csv`, `labels/golden_baseline.csv` (metadata only: URLs, timestamps, labels, expected golden numbers) and trained model weights (via GitHub Releases, not the repo, if large).
 - Held-out test set: Ciryl Gane fights (vs Tom Aspinall at UFC 321, vs Josh Hokit at UFC 334, plus any others Ari adds). These are `split=test` in `fights.csv` and are only run at the end of a phase for reporting.
 
 ### Label schemas
@@ -95,7 +95,7 @@ Do not add AGPL or non-commercial dependencies (e.g. Ultralytics YOLO, OpenPose)
 ## Evaluation conventions
 - Event-level matching: a predicted flag counts as a hit if it overlaps a labeled event of the same type within a tolerance (default ±1.0 s).
 - Report per foul type: recall (fouls caught), precision (flags that were real), false flags per fight. Never report plain accuracy.
-- Every section that touches perception or detection re-runs the golden set and notes regressions in PROGRESS.md.
+- Every section that touches perception or detection re-runs the golden set (`deepfoul id-golden`, `--from-cache` when only identity changed) and notes regressions in PROGRESS.md. The report compares each clip to `labels/golden_baseline.csv`; known failures are listed there with the section that owns the fix. Update the baseline only when a change is an accepted improvement.
 
 ## Repo layout
 ```

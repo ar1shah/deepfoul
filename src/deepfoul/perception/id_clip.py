@@ -1,81 +1,25 @@
 """Identity on a time span of a fight: the passes behind `deepfoul id-golden`.
 
-1. GPU pass (cached): detect -> filter -> ByteTrack -> RTMW on kept boxes, in frame order.
-   Writes <cache>/<clip>_tracks.parquet and <clip>_pose.npz. `--from-cache` skips it.
-2. Descriptor pass (CPU): re-decode the frames and read each kept box's colors from its
-   pose-guided regions.
-3. Identity (no pixels): per-frame assignment against the fight profile, then smoothing within
-   tracklets.
-4. Render pass (CPU): re-decode and draw red / blue / merged boxes.
-
-The passes are split for tuning speed (identity re-runs without the GPU). Each one only reads
-frames up to t + lookahead, so the same logic runs streaming with a short frame buffer.
+1. GPU pass (cached): `extract.perceive_span`, the same in-order pass `deepfoul extract` runs on
+   a whole fight (detect -> filter -> ByteTrack -> RTMW -> color descriptors from the frame in
+   memory). Writes <cache>/<clip>_boxes.parquet + <clip>_frames.parquet. `--from-cache` skips it.
+2. Identity (no pixels): `extract.identify`, per-frame assignment against the fight profile, then
+   smoothing within tracklets.
+3. Render pass (CPU): decode and draw red / blue / merged boxes.
 """
 
 from __future__ import annotations
 
-import time
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
 from deepfoul.perception.appearance import describe
-from deepfoul.perception.identity import BoxObs, Profile, assign_frame, build_profile, smooth_labels
+from deepfoul.perception.extract import make_profile, read_boxes, region_cfg
+from deepfoul.perception.identity import Profile, build_profile
 
 RED, BLUE, PURPLE, GREY, REF = (40, 40, 230), (230, 120, 30), (200, 60, 200), (150, 150, 150), (0, 215, 255)
-
-
-def region_cfg(icfg: dict) -> dict:
-    return {**icfg["regions"], "sat_min": icfg["sat_min"], "v_min": icfg["v_min"]}
-
-
-# ---------------------------------------------------------------- pose cache
-
-
-def save_pose(path: Path, frame_idx, det_idx, kpts, scores) -> None:
-    np.savez_compressed(path, frame_idx=np.asarray(frame_idx, np.int64),
-                        det_idx=np.asarray(det_idx, np.int64),
-                        kpts=np.asarray(kpts, np.float32).reshape(-1, 133, 2),
-                        scores=np.asarray(scores, np.float32).reshape(-1, 133))
-
-
-def load_pose(path: Path) -> dict[tuple[int, int], tuple[np.ndarray, np.ndarray]]:
-    z = np.load(path)
-    return {(int(f), int(d)): (k, s) for f, d, k, s in
-            zip(z["frame_idx"], z["det_idx"], z["kpts"], z["scores"])}
-
-
-# ---------------------------------------------------------------- 1. GPU pass
-
-
-def track_pose_clip(row: dict, start_s: float, end_s: float, shots: list[dict], fps: float,
-                    detect, pose, cfg: dict, raw_dir: Path):
-    """Returns (tracks DataFrame, pose arrays, timing dict)."""
-    from deepfoul.io.video import iter_fight_frames
-    from deepfoul.perception.track import COLUMNS, make_tracker, track_stream
-
-    tcfg = cfg["tracking"]
-    tracker = make_tracker(tcfg["bytetrack"], fps)
-    rows, meta = [], []
-    pf, pd_, pk, ps = [], [], [], []
-    det_s = pose_s = 0.0
-    t0 = time.perf_counter()
-    for res in track_stream(iter_fight_frames(row, raw_dir, start_s, end_s), shots, detect,
-                            tracker, tcfg["filters"], tcfg["cut_guard_frames"], pose):
-        rows.extend(res.rows)
-        meta.append((res.idx, res.t, res.shot_id, res.guard))
-        det_s += res.det_s
-        pose_s += res.pose_s
-        di, k, s = res.pose
-        pf += [res.idx] * len(di)
-        pd_ += list(di)
-        pk += list(k)
-        ps += list(s)
-    wall = time.perf_counter() - t0
-    timing = {"frames": len(meta), "det_s": det_s, "pose_s": pose_s, "wall_s": wall,
-              "pose_boxes": len(pf)}
-    return pd.DataFrame(rows, columns=COLUMNS), meta, (pf, pd_, pk, ps), timing
 
 
 # ---------------------------------------------------------------- profiles
@@ -110,60 +54,24 @@ def get_profile(row: dict, cfg: dict, detect, pose, raw_dir: Path, cache_dir: Pa
     path = cache_dir / f"{fid}_profile.npz"
     if path.exists() and not rebuild:
         return Profile.load(path)
-    if detect is None:
+    from deepfoul.io.fights import window
+
+    kp = cfg["paths"]["keypoints"] / f"{fid}.parquet"
+    if kp.exists():   # same rows `deepfoul extract` learned it from
+        cols = ["frame_idx", "t", "x1", "y1", "x2", "y2", "hist_shorts", "hist_torso",
+                "hist_thigh", "hist_shins", "shin_skin", "torso_skin", "clothed", "torso_len"]
+        prof = make_profile(fid, row, read_boxes(kp, cols), window(row)[0] or 0.0, cfg)
+    elif detect is None:
         raise RuntimeError(f"{fid}: no cached profile at {path}; run without --from-cache once")
-    samples = profile_samples(row, cfg, detect, pose, raw_dir, fps)
-    icfg = cfg["identity"]
-    prof = build_profile(fid, row["red_shorts"], row["blue_shorts"], samples,
-                         {**icfg, "colors": icfg["colors"]})
+    else:
+        samples = profile_samples(row, cfg, detect, pose, raw_dir, fps)
+        prof = build_profile(fid, row["red_shorts"], row["blue_shorts"], samples, cfg["identity"])
     cache_dir.mkdir(parents=True, exist_ok=True)
     prof.save(path)
     return prof
 
 
-# ---------------------------------------------------------------- 2-3. descriptors + identity
-
-
-def identify_clip(row: dict, start_s: float, end_s: float, tracks: pd.DataFrame,
-                  pose: dict, prof: Profile, cfg: dict, raw_dir: Path, fps: float) -> pd.DataFrame:
-    """One row per kept box: tracks columns + appearance summary + raw_label / label / cost."""
-    from deepfoul.io.video import iter_fight_frames
-
-    icfg = cfg["identity"]
-    rc = region_cfg(icfg)
-    kept = tracks[tracks["kept"]].copy()
-    by_frame = {f: g for f, g in kept.groupby("frame_idx")}
-    out = []
-    for f in iter_fight_frames(row, raw_dir, start_s, end_s):
-        g = by_frame.get(f.idx)
-        if g is None:
-            continue
-        obs, recs = [], []
-        for _, r in g.iterrows():
-            box = np.array([r.x1, r.y1, r.x2, r.y2], np.float32)
-            kp = pose.get((int(r.frame_idx), int(r.det_idx)))
-            if kp is None:
-                continue
-            app = describe(f.image, kp[0], kp[1], box, rc, cfg["kpt_conf_min"])
-            o = BoxObs(box, app)
-            obs.append(o)
-            recs.append(r)
-        if not obs:
-            continue
-        for r, o, a in zip(recs, obs, assign_frame(obs, prof, icfg)):
-            out.append({**r.to_dict(), "clothed": o.app.clothed, "shin_skin": o.app.shin_skin,
-                        "torso_skin": o.app.torso_skin,
-                        "has_shorts": o.app.shorts is not None, "raw_label": a["label"],
-                        "cost": a["cost"], "margin": a["margin"], "fallback": a["fallback"],
-                        "cost_red": a["cost_red"], "cost_blue": a["cost_blue"],
-                        "cost_ref": a["cost_ref"]})
-    df = pd.DataFrame(out)
-    if df.empty:
-        return df
-    return smooth_labels(df, fps, icfg)
-
-
-# ---------------------------------------------------------------- 4. render
+# ---------------------------------------------------------------- render
 
 
 def render_identity(row: dict, start_s: float, end_s: float, tracks: pd.DataFrame,

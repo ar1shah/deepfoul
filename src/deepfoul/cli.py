@@ -170,47 +170,260 @@ def _fight_rows(fight_ids: list[str], split: str | None = None) -> list[dict[str
     return [rows[f] for f in fight_ids]
 
 
-@app.command()
-def extract(
-    fight_ids: list[str] = typer.Argument(None, help="fight_ids from fights.csv."),
-    shots: bool = typer.Option(False, "--shots", help="Detect camera cuts (the only stage so far)."),
-    split: str = typer.Option(None, "--split", help="Run every fight in this split instead."),
-    force: bool = typer.Option(False, "--force", help="Re-run even if the cache is up to date."),
-) -> None:
-    """Run perception stages on fights. Writes data/cache/<fight_id>_shots.json."""
+def _ensure_shots(row: dict, cfg: dict, force: bool = False) -> dict:
+    """The fight's shot file, (re)built if missing, stale or forced."""
     import time
 
     from deepfoul.io.fights import window
     from deepfoul.io.shots import (detect_shots, load_shots, save_shots, shots_cfg_for,
                                    shots_path, stale_reason)
 
-    if not shots:
-        raise typer.BadParameter("nothing to do: pass --shots (pose extraction lands in 1.4)")
-    if not fight_ids and not split:
-        raise typer.BadParameter("give fight_ids or --split")
+    fid = row["fight_id"].strip()
+    video = cfg["paths"]["raw"] / f"{fid}.mp4"
+    start, end = window(row)
+    win = (start or 0.0, end)
+    out = shots_path(cfg["paths"]["cache"], fid)
+    shots_cfg = shots_cfg_for(cfg["shots"], fid)
+    if out.exists() and not force:
+        doc = load_shots(out)
+        reason = stale_reason(doc, win, shots_cfg)
+        if reason is None:
+            return doc
+        typer.echo(f"{fid}: shots re-running, {reason}")
+    t0 = time.perf_counter()
+    doc = {"fight_id": fid, **detect_shots(video, win[0], win[1], shots_cfg)}
+    save_shots(doc, out)
+    lens = [s["end_s"] - s["start_s"] for s in doc["shots"]]
+    typer.echo(f"{fid}: {len(lens)} shots, median {sorted(lens)[len(lens) // 2]:.1f}s, "
+               f"{time.perf_counter() - t0:.0f}s -> {out}")
+    return doc
+
+
+def _extract_rows(fight_ids: list[str], split: str | None) -> list[dict]:
+    """Explicit ids, a split, or (neither) --all: every non-test fight, train first, then val."""
+    if fight_ids or split:
+        return _fight_rows(fight_ids or [], split)
+    order = {"train": 0, "val": 1}
+    picked = [r for r in _fight_rows([], None) if r["split"].strip() in order]
+    return sorted(picked, key=lambda r: order[r["split"].strip()])  # stable: CSV order kept
+
+
+@app.command()
+def extract(
+    fight_ids: list[str] = typer.Argument(None, help="fight_ids from fights.csv."),
+    all_: bool = typer.Option(False, "--all", help="Every downloaded non-test fight (train, then "
+                              "val) that isn't extracted yet."),
+    split: str = typer.Option(None, "--split", help="Every fight in this split."),
+    shots: bool = typer.Option(False, "--shots", help="Only detect camera cuts."),
+    from_cache: bool = typer.Option(False, "--from-cache", help="Re-run identity from the cached "
+                                    "keypoints (no GPU, no decode)."),
+    force: bool = typer.Option(False, "--force", help="Re-run even if up to date."),
+    rebuild_profile: bool = typer.Option(False, "--rebuild-profile",
+                                         help="With --from-cache: re-learn the fight profile."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="List what would run, then stop."),
+) -> None:
+    """Shots + detect/track/pose + identity in one in-order pass per fight.
+
+    Writes data/keypoints/<fight_id>.parquet (one row per kept box: corner, box, 133 keypoints,
+    scores, color histograms) and <fight_id>_frames.parquet, plus outputs/extract_report.md.
+    An interrupted run resumes from the last finished part.
+    """
+    import shutil
+    import time
+    import traceback
+
+    import pandas as pd
+
+    from deepfoul.io.fights import window
+    from deepfoul.io.power import keep_awake
+    from deepfoul.io.shots import load_shots, shots_path
+    from deepfoul.io.video import video_info
+    from deepfoul.perception.extract import (assemble, finalize, plan_job, read_boxes,
+                                             read_meta, run_perception, stride_for, summarize)
+    from deepfoul.perception.identity import check_lookahead
+    from deepfoul.viz.extract_report import fmt_dur, write_extract_report
+
+    if not (fight_ids or split or all_):
+        raise typer.BadParameter("give fight_ids, --split or --all")
     cfg = load_config()
-    for row in _fight_rows(fight_ids or [], split):
+    rows = _extract_rows(fight_ids or [], split)
+    if shots:
+        for row in rows:
+            fid = row["fight_id"].strip()
+            if not (cfg["paths"]["raw"] / f"{fid}.mp4").exists():
+                typer.secho(f"{fid}: no video, run `deepfoul fetch`", fg="red", err=True)
+                continue
+            _ensure_shots(row, cfg, force)
+        return
+
+    gpu, vram = _gpu_info()
+    mode = cfg["profiles"][pick_profile(cfg, vram)]["pose_mode"]
+    gpu_s = f"{gpu} ({vram} GB)" if gpu else "none"
+    report = cfg["paths"]["outputs"] / "extract_report.md"
+    log_dir = cfg["paths"]["outputs"] / "extract_logs"
+
+    # ---- plan: status and frame estimate per fight
+    results = []
+    for row in rows:
         fid = row["fight_id"].strip()
+        r = {"fight_id": fid, "split": row["split"].strip(), "row": row, "frames_est": 0}
         video = cfg["paths"]["raw"] / f"{fid}.mp4"
         if not video.exists():
-            typer.secho(f"{fid}: no video at {video}, run `deepfoul fetch`", fg="red", err=True)
+            r["status"] = "no video"
+            results.append(r)
             continue
-        start, end = window(row)
-        win = (start or 0.0, end)
-        out = shots_path(cfg["paths"]["cache"], fid)
-        shots_cfg = shots_cfg_for(cfg["shots"], fid)
-        if out.exists() and not force:
-            reason = stale_reason(load_shots(out), win, shots_cfg)
-            if reason is None:
-                typer.echo(f"{fid}: up to date ({out.name})")
-                continue
-            typer.echo(f"{fid}: re-running, {reason}")
-        t0 = time.perf_counter()
-        doc = {"fight_id": fid, **detect_shots(video, win[0], win[1], shots_cfg)}
-        save_shots(doc, out)
-        lens = [s["end_s"] - s["start_s"] for s in doc["shots"]]
-        typer.echo(f"{fid}: {len(lens)} shots, median {sorted(lens)[len(lens) // 2]:.1f}s, "
-                   f"{time.perf_counter() - t0:.0f}s -> {out}")
+        r["status"] = "pending"
+        sp = shots_path(cfg["paths"]["cache"], fid)
+        if sp.exists():
+            job = plan_job(row, cfg, load_shots(sp), mode, force)
+            r.update(job=job, stride=job.stride, frames_est=job.frames_total - job.frames_done)
+            if job.status == "up_to_date" and not from_cache:
+                r.update(status="up to date", frames_est=0)
+        else:   # no shot file yet: estimate from the window and the frame rate
+            info = video_info(video)
+            start, end = window(row)
+            end = end if end is not None else info["duration_s"]
+            st = stride_for(info["fps"], cfg["extract"]["target_fps"])
+            r.update(stride=st, frames_est=int((end - (start or 0.0)) * info["fps"] / st))
+        results.append(r)
+
+    todo = [r for r in results if r["status"] == "pending"]
+    typer.echo(f"{len(results)} fights, {len(todo)} to run:")
+    for r in results:
+        job = r.get("job")
+        extra = (f"{job.status} {job.reason}".strip() if job and r["status"] == "pending" else
+                 "no shots yet" if r["status"] == "pending" else "")
+        typer.echo(f"  {r['fight_id']:<36} {r['split']:<5} {r['status']:<10} "
+                   + (f"~{r['frames_est']} frames (stride {r['stride']}) {extra}"
+                      if r["status"] == "pending" else ""))
+    if dry_run:
+        return
+
+    det = pose = None
+    models: dict = {}
+
+    def get_models():
+        nonlocal det, pose
+        if det is None:
+            from deepfoul.perception.detect import PersonDetector
+            from deepfoul.perception.extract import model_info
+            from deepfoul.perception.pose import PoseEstimator
+
+            _init_ort()
+            device = cfg["device"] if cfg["device"] != "auto" else ("cuda" if gpu else "cpu")
+            det = PersonDetector(mode, device, cfg["det"]["score_min"])
+            pose = PoseEstimator(mode, device, cfg["pose"]["batch"])
+            typer.echo(f"detector + pose ({mode}) on {det.providers[0]} / {pose.providers[0]}, "
+                       f"pose batched: {pose.batched}")
+            models.update(model_info(det, pose))
+        return det, pose
+
+    run_t0 = time.perf_counter()
+    run_frames = 0
+
+    def write_report():
+        write_extract_report([{k: v for k, v in r.items() if k not in ("row", "job")}
+                              for r in results], report, gpu_s,
+                             time.perf_counter() - run_t0, 70.0)
+
+    def fill_from_file(r, job):
+        meta = read_meta(job.paths["boxes"])
+        b = read_boxes(job.paths["boxes"], ["frame_idx", "corner"])
+        f = pd.read_parquet(job.paths["frames"])
+        r.update(summary=summarize(b, f), profile_n=meta["profile"]["n"],
+                 warnings=meta["profile"]["warnings"] + meta.get("grid_warnings", []),
+                 size_mb=job.paths["boxes"].stat().st_size / 1e6, stride=meta["stride"])
+
+    def on_part(job, p, timing):
+        nonlocal run_frames
+        run_frames += timing["frames"]
+        el = time.perf_counter() - run_t0
+        fps = run_frames / el if el else 0.0
+        left_fight = job.frames_total - job.frames_done
+        left_run = left_fight + sum(x["frames_est"] for x in results
+                                    if x["status"] == "pending")
+        eta = (lambda n: fmt_dur(n / fps)) if fps else (lambda n: "-")
+        typer.echo(f"{job.fid} part {p['part'] + 1}/{len(job.parts)} "
+                   f"{100 * job.frames_done / max(job.frames_total, 1):.0f}% | "
+                   f"{timing['frames'] / max(timing['wall_s'], 1e-9):.1f} fps (run {fps:.1f}) | "
+                   f"fight ETA {eta(left_fight)} | run ETA {eta(left_run)}")
+
+    for r in results:
+        if r["status"] == "up to date":
+            try:
+                fill_from_file(r, r["job"])
+            except Exception:  # noqa: BLE001 - a broken old file shouldn't stop the run
+                pass
+    write_report()
+    with keep_awake() as awake:
+        if todo and not from_cache:
+            typer.echo("keeping the PC awake while this runs" if awake else
+                       "could not keep the PC awake (not Windows?)")
+        for r in todo:
+            fid, row = r["fight_id"], r["row"]
+            t0 = time.perf_counter()
+            r["status"] = "running"
+            try:
+                doc = _ensure_shots(row, cfg)
+                check_lookahead(cfg["identity"], doc["fps"], cfg["lookahead_s"])
+                job = plan_job(row, cfg, doc, mode, force and not from_cache)
+                r.update(job=job, stride=job.stride)
+                if from_cache:
+                    if job.status not in ("up_to_date", "identity"):
+                        raise RuntimeError("no up-to-date keypoints to re-run identity on "
+                                           f"({job.reason or 'not extracted'}); run without "
+                                           "--from-cache")
+                    meta = read_meta(job.paths["boxes"])
+                    keep = {k: meta[k] for k in ("models", "perception_timing", "grid_warnings")
+                            if k in meta}
+                    finalize(job, cfg, read_boxes(job.paths["boxes"]),
+                             pd.read_parquet(job.paths["frames"]), keep, rebuild_profile)
+                    r["status"] = "identity re-run"
+                else:
+                    resumed = job.status == "resume"
+                    timing = {}
+                    if job.status != "identity":
+                        typer.echo(f"{fid}: {job.status} {job.reason}, {len(job.parts)} parts, "
+                                   f"{job.frames_total} frames (stride {job.stride})")
+                        d, p = get_models()
+                        timing = run_perception(job, cfg, d, p, on_part, force)
+                        r["run_frames"], r["run_s"] = timing["frames"], timing["wall_s"]
+                        boxes, frames = assemble(job)
+                        base = {"models": dict(models), "perception_timing": timing,
+                                "grid_warnings": job.extra.get("grid_warnings", [])}
+                    else:
+                        meta = read_meta(job.paths["boxes"])
+                        boxes = read_boxes(job.paths["boxes"])
+                        frames = pd.read_parquet(job.paths["frames"])
+                        base = {k: meta[k] for k in ("models", "perception_timing",
+                                                     "grid_warnings") if k in meta}
+                    finalize(job, cfg, boxes, frames, base, rebuild_profile=True)
+                    shutil.rmtree(job.paths["parts"], ignore_errors=True)
+                    r["status"] = ("identity re-run" if job.status == "identity" else
+                                   "resumed" if resumed else "done")
+                r["time_s"] = time.perf_counter() - t0
+                fill_from_file(r, job)
+                s = r["summary"]
+                typer.echo(f"{fid}: {r['status']} in {fmt_dur(r['time_s'])}, both "
+                           f"{s['both_pct']:.0f}%, both or merged {s['both_or_merged_pct']:.0f}% "
+                           f"({s['bom_of_visible_pct']:.0f}% of frames with a fighter)")
+            except KeyboardInterrupt:
+                r["status"] = "interrupted"
+                write_report()
+                typer.secho(f"{fid}: interrupted, run the same command again to resume",
+                            fg="yellow")
+                raise typer.Exit(130)
+            except Exception as e:  # noqa: BLE001 - one bad fight must not stop the batch
+                log_dir.mkdir(parents=True, exist_ok=True)
+                log = log_dir / f"{fid}.log"
+                log.write_text(traceback.format_exc(), encoding="utf-8")
+                r.update(status="failed", error=f"{type(e).__name__}: {e}",
+                         log=log.relative_to(cfg["paths"]["outputs"]).as_posix(),
+                         time_s=time.perf_counter() - t0)
+                typer.secho(f"{fid}: FAILED {r['error']} (log {log})", fg="red", err=True)
+            r["frames_est"] = 0
+            write_report()
+    typer.echo(f"report -> {report}")
 
 
 @app.command("shots-check")
@@ -469,27 +682,31 @@ def _shorts_report(cfg: dict, out_dir: Path) -> None:
 def id_golden(
     only: list[str] = typer.Option(None, "--only", help="Only these golden event_ids / check_ids."),
     from_cache: bool = typer.Option(False, "--from-cache",
-                                    help="Reuse cached tracks + pose (no GPU work)."),
+                                    help="Reuse cached boxes + pose + colors (no GPU, no decode "
+                                    "except for renders)."),
     no_render: bool = typer.Option(False, "--no-render", help="Skip the videos."),
     show_ref: bool = typer.Option(False, "--show-ref", help="Draw a thin labelled box on the ref."),
     rebuild_profiles: bool = typer.Option(False, "--rebuild-profiles",
                                           help="Re-learn the fight profiles."),
     no_checks: bool = typer.Option(False, "--no-checks", help="Skip the extra check spans."),
+    tag: str = typer.Option("1.4", "--tag", help="Output folder under outputs/renders/."),
 ) -> None:
     """Detect + track + pose + red/blue/ref identity on every golden clip (and the checks).
 
-    Renders to outputs/renders/1.3/ (with --show-ref: outputs/renders/1.3/show_ref/), caches to
-    data/cache/identity/, writes outputs/renders/1.3/report.md.
+    Same pass as `deepfoul extract`, on the golden spans. Renders to outputs/renders/<tag>/ (with
+    --show-ref: .../show_ref/), caches to data/cache/identity/, writes
+    outputs/renders/<tag>/report.md with each clip compared to labels/golden_baseline.csv.
     """
     import csv
     import json
 
     from deepfoul.io.fetch import read_fights
-    from deepfoul.io.shots import load_shots, shots_path
-    from deepfoul.perception.id_clip import (get_profile, identify_clip, load_pose,
-                                             render_identity, save_pose, track_pose_clip)
+    from deepfoul.io.shots import first_frame_at, load_shots, shots_path
+    from deepfoul.perception.extract import (identify, perceive_span, read_boxes, stride_for,
+                                             write_parquet)
+    from deepfoul.perception.id_clip import get_profile, render_identity
     from deepfoul.perception.identity import check_lookahead
-    from deepfoul.viz.id_report import clip_identity_summary, write_id_report
+    from deepfoul.viz.id_report import clip_identity_summary, read_baseline, write_id_report
 
     cfg = load_config()
     detector = pose = None
@@ -516,7 +733,7 @@ def id_golden(
     if only:
         jobs = [j for j in jobs if j[0] in only]
 
-    out_dir = cfg["paths"]["outputs"] / "renders" / "1.3"
+    out_dir = cfg["paths"]["outputs"] / "renders" / tag
     cache_dir = cfg["paths"]["cache"] / "identity"
     cache_dir.mkdir(parents=True, exist_ok=True)
     profiles, summaries = {}, []
@@ -524,6 +741,7 @@ def id_golden(
         row = fights[fid]
         doc = load_shots(shots_path(cfg["paths"]["cache"], fid))
         fps = doc["fps"]
+        stride = stride_for(fps, cfg["extract"]["target_fps"])
         check_lookahead(cfg["identity"], fps, cfg["lookahead_s"])
         if fid not in profiles:
             profiles[fid] = get_profile(row, cfg, detector, pose, cfg["paths"]["raw"], cache_dir,
@@ -531,41 +749,54 @@ def id_golden(
             p = profiles[fid]
             typer.echo(f"{fid}: profile from {p.n} teaching frames"
                        + "".join(f"\n  WARNING {w}" for w in p.warnings))
-        tracks_path = cache_dir / f"{clip_id}_tracks.parquet"
-        pose_path = cache_dir / f"{clip_id}_pose.npz"
+        boxes_path = cache_dir / f"{clip_id}_boxes.parquet"
+        frames_path = cache_dir / f"{clip_id}_frames.parquet"
         timing_path = cache_dir / f"{clip_id}_timing.json"
         timing = None
         if from_cache:
-            if not tracks_path.exists():
-                typer.secho(f"{clip_id}: no cache, run without --from-cache", fg="red")
+            if not boxes_path.exists():
+                typer.secho(f"{clip_id}: no cache (1.3 caches have no colors), run without "
+                            "--from-cache", fg="red")
                 continue
-            tracks = pd_read(tracks_path)
+            boxes, frames = read_boxes(boxes_path), pd_read(frames_path)
             if timing_path.exists():
                 timing = json.loads(timing_path.read_text())
         else:
-            tracks, _, (pf, pdi, pk, ps), timing = track_pose_clip(
-                row, start, end, doc["shots"], fps, detector, pose, cfg, cfg["paths"]["raw"])
-            tracks.to_parquet(tracks_path, index=False)
-            save_pose(pose_path, pf, pdi, pk, ps)
+            boxes, frames, timing = perceive_span(
+                row, first_frame_at(start, fps), first_frame_at(end, fps), doc["shots"], fps,
+                stride, detector, pose, cfg, cfg["paths"]["raw"])
+            write_parquet(boxes, boxes_path)
+            write_parquet(frames, frames_path)
             timing_path.write_text(json.dumps(timing))
-        ident = identify_clip(row, start, end, tracks, load_pose(pose_path), profiles[fid], cfg,
-                              cfg["paths"]["raw"], fps)
-        ident.to_parquet(cache_dir / f"{clip_id}_identity.parquet", index=False)
+        ident = identify(boxes, profiles[fid], cfg, fps / stride)
+        ident = pd_concat([boxes.drop(columns=["kpts", "kpt_scores"]), ident])
+        ident.drop(columns=[c for c in ident.columns if c.startswith("hist_")]).to_parquet(
+            cache_dir / f"{clip_id}_identity.parquet", index=False)
         kind = note.split(":")[0].replace(" ", "_")
         render = None
         if golden and not no_render:
             render = (out_dir / "show_ref" if show_ref else out_dir) / f"{clip_id}_{fid}_{kind}.mp4"
-            render_identity(row, start, end, tracks, ident, cfg["paths"]["raw"], render, show_ref)
-        s = clip_identity_summary(clip_id, fid, start, end, note, tracks, ident, fps, timing,
-                                  render.relative_to(out_dir).as_posix() if render else None)
+            render_identity(row, start, end, frames, ident, cfg["paths"]["raw"], render, show_ref)
+        s = clip_identity_summary(clip_id, fid, start, end, note, frames, ident, fps, timing,
+                                  render.relative_to(out_dir).as_posix() if render else None,
+                                  step=stride)
         summaries.append(s)
         typer.echo(f"{clip_id}: both fighters {s['both_pct']:.0f}% of frames, "
+                   f"both or merged {s['both_or_merged_pct']:.0f}%, "
                    f"flips {s['flips']}, ref {s['ref_frames']}, merged {s['merged_frames']}"
-                   + (f", det+pose {timing['frames'] / timing['wall_s']:.1f} fps" if timing else ""))
+                   + (f", pass {timing['frames'] / timing['wall_s']:.1f} fps" if timing else ""))
     report = out_dir / "report.md"
     write_id_report(summaries, profiles, fights, report, f"{gpu} ({vram} GB)" if gpu else "none",
-                    cfg["identity_issue_checks"])
+                    cfg["identity_issue_checks"],
+                    read_baseline(cfg["paths"]["labels"] / "golden_baseline.csv"),
+                    f"Identity check ({tag})")
     typer.echo(f"report -> {report}")
+
+
+def pd_concat(frames):
+    import pandas as pd
+
+    return pd.concat(frames, axis=1)
 
 
 def pd_read(path):
