@@ -1,40 +1,36 @@
 # DeepFoul Roadmap
 
-## ▶ Now: 1.2 Detection and tracking
+## ▶ Now: 1.3 Identity: ref filter and red/blue
 
-**Before the kickoff (you, left over from 1.1)**
-1. Open `outputs/shots_check/` (two cut sheets + `report.md`). Each pair should be two different camera angles. I already checked all 20 by eye, so just note anything that looks off: fake cuts (same angle) or obvious missed cuts.
-2. **Pick the golden set** (10 to 30 s each, live speed, train fights only, no replays). Times are from the original video, as VLC shows them. The preview clips have the original time burned in at the top left (`mm:ss.cc  f<frame>`), so you can read times straight off them.
-   1. **Eye poke:** the poke previews in `outputs/golden_candidates/` (see `index.md`). Munhoz vs O'Malley (12:07) or Battle vs Loosa (08:09).
-   2. **Low blow:** Holland vs Malott (05:02 or 05:52).
-   3. **Clean stand-up exchange**, both fighters fully visible: O'Malley vs Vera or Magomedov vs Petrosyan.
-   4. **Clinch against the cage:** Barber vs Grasso, or any train fight.
-   5. **Ref stepping in** between the fighters (a break or a stoppage): any train fight.
-   6. **(Bonus) women's stand-up exchange:** Barber vs Grasso.
-   Don't use Edwards vs Muhammad or Garbrandt vs Long (video quality), or any val or test fight. Avoid between-round segments (dissolves aren't detected as cuts).
-   Format: `1. ufc276_munhoz_omalley 11:55-12:20 eye poke`
+**Before the kickoff (you, left over from 1.2)**
+1. Watch every render in `outputs/renders/1.2/` (`report.md` links them and has per-shot track counts). Colored box = tracked (`<shot>-<id> <score>`), white = not confirmed yet, grey = dropped by a filter (rule name shown), `CUT` = guard frame at a camera cut.
+2. Write each problem as `clip timestamp what happened` (e.g. `golden 4, 14:05, fighters merged into one box in clinch`). Known already, no need to list: clinch merges in golden 4, a new ref ID every time he leaves the frame.
 
 **Kickoff prompt**
 ```
-Read CLAUDE.md, ROADMAP.md and PROGRESS.md. Plan section 1.2 only. Wait for my approval before writing code.
-Shot detection issues from 1.1: <list or "none">.
-Golden set (write these to labels/golden.csv first):
-<paste your golden list>
+Read CLAUDE.md, ROADMAP.md and PROGRESS.md. Plan section 1.3 only. Wait for my approval before writing code.
+Tracking issues from 1.2: <list or "none beyond the known ones">.
 ```
 
 **Claude Code does**
-1. Write the golden list to `labels/golden.csv` (converting mm:ss to seconds).
-2. Person detection (rtmlib YOLOX) + ByteTrack within each shot. Read frames with `iter_fight_frames` and reset the tracker whenever `shot_index_at_frame` changes (shot files are already cached for all 9 train fights). Treat cuts as ±1 frame: some uploads blend one frame across a cut.
-3. Filters: drop small boxes and boxes outside the cage area (crowd, camera crew). Thresholds in config.
-4. Debug renders (boxes + track IDs + timestamp) for every golden clip in `outputs/renders/1.2/`.
+1. **Shorts colors first:** for each fight in `fights.csv`, save one frame where both fighters and the broadcast name graphic are visible to `outputs/shorts_check/<fight_id>.jpg`. Read off the shorts colors and which fighter is in which corner, fill `red_shorts` / `blue_shorts`, and flag fights where the two colors are similar. (Holland-Malott: red corner wears black, blue corner wears red.)
+2. **Pause point:** stop and ask Ari to verify the colors.
+3. Per-fight color profiles: sample torso and leg regions from early frames, build HSV histograms per person.
+4. Ref detection: the person with a shirt + long pants profile, plus a fallback ("the third person who never fights"). Tune it on the 1.2 track files (`data/cache/golden/*_tracks.parquet` keep every detection, including dropped ones with `drop_reason`), and handle seated cageside officials that get tracked in ground shots.
+5. Corner assignment from the shorts colors. Carry identity across shot cuts and ref re-entries by matching profiles. Handle the clinch case where the two fighters come out as one merged box.
+6. Re-render the golden clips with red/blue boxes and no box on the ref, in `outputs/renders/1.3/`. Keep the 3 check spans in the report.
 
 **Done when**
-- On the golden clips, the 2 fighters and the ref each keep a stable track ID through stand-up exchanges, and the crowd isn't tracked.
+- Golden clips render with correct red/blue labels, nothing on the ref, and identities survive the cuts in those clips.
+- It works on the similar-shorts fight.
 
-**You do**
-1. Watch every debug render.
-2. Write down each problem as `clip timestamp what happened` (e.g. `golden 2, 00:12, fighters swapped IDs in clinch`).
-3. Paste the list into the 1.3 kickoff prompt.
+**You do (at the pause point)**
+1. Open each image in `outputs/shorts_check/` and compare it to what Claude Code wrote. A wrong corner flips every label for that fight.
+2. Reply with `colors ok`, or with corrections like `ufc276_omalley_munhoz: red = purple, blue = black`.
+
+**You do (after the session)**
+1. Watch the `outputs/renders/1.3/` renders. Note any corner flips or ref boxes.
+2. Paste the issues into the 1.4 kickoff prompt.
 
 ---
 
@@ -104,31 +100,7 @@ Variety: at least 2 women's fights, at least 1 fight with similar or dark shorts
 
 ## Phase 1: Perception pipeline (the "eyes")
 
-1.2 is in progress (see **Now** at the top).
-
-### 1.3 Identity: ref filter and red/blue
-
-**Kickoff prompt**: standard, plus your tracking issue list from 1.2.
-
-**Claude Code does**
-1. **Shorts colors first:** for each fight in `fights.csv`, save one frame where both fighters and the broadcast name graphic are visible to `outputs/shorts_check/<fight_id>.jpg`. Read off the shorts colors and which fighter is in which corner, fill `red_shorts` / `blue_shorts`, and flag fights where the two colors are similar.
-2. **Pause point:** stop and ask Ari to verify the colors.
-3. Per-fight color profiles: sample torso and leg regions from early frames, build HSV histograms per person.
-4. Ref detection: the person with a shirt + long pants profile, plus a fallback ("the third person who never fights").
-5. Corner assignment from the shorts colors. Carry identity across shot cuts by matching profiles.
-6. Re-render the golden clips with red/blue boxes and no box on the ref, in `outputs/renders/1.3/`.
-
-**You do (at the pause point)**
-1. Open each image in `outputs/shorts_check/` and compare it to what Claude Code wrote. A wrong corner flips every label for that fight.
-2. Reply with `colors ok`, or with corrections like `ufc276_omalley_munhoz: red = purple, blue = black`.
-
-**Done when**
-- Golden clips render with correct red/blue labels, nothing on the ref, and identities survive the cuts in those clips.
-- It works on the similar-shorts fight.
-
-**You do (after the session)**
-1. Watch the `outputs/renders/1.3/` renders. Note any corner flips or ref boxes.
-2. Paste the issues into the 1.4 kickoff prompt.
+1.3 is in progress (see **Now** at the top).
 
 ### 1.4 Pose extraction and caching
 
@@ -504,6 +476,9 @@ uv project, `deepfoul doctor` / `fetch` / `pose-check`, label CSV headers, machi
 
 ### 1.1 Video IO and shot detection ✅
 Frame reader (`iter_frames`, frame-exact vs ffmpeg on the 50 and 60 fps videos), shot files for all 9 train fights (AdaptiveDetector tuned to 2.0 / 30), `extract --shots`, `shots-check`, `golden-candidates` (4 clips with burned timestamps), `frame-check`. Found: Garbrandt-Long is 25 fps padded with duplicate frames, not interpolated; dissolves between rounds aren't detected as cuts.
+
+### 1.2 Detection and tracking ✅
+Golden set in `labels/golden.csv` (golden 5 shifted to 11:10-11:30 to stay in the fight window). rtmlib YOLOX with scores kept + ByteTrack from Roboflow `trackers` (supervision dropped it), reset at every cut with ±1-frame guard frames, loose crowd filters plus a relative-height rule. `deepfoul track-golden` writes renders, per-detection parquet and a report. Stand-up is stable; clinch merges, ground shots and ref re-entry IDs go to 1.3. Detection ~20 fps on the 2080.
 
 ---
 

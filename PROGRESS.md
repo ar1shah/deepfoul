@@ -8,7 +8,7 @@ Claude Code updates this file at the end of every ROADMAP section. Newest entrie
 | 0 | 0.1 Repo and environment | Done (RTX 2080) |
 | 0 | 0.2 Starter fights | Done (15/15 downloaded) |
 | 1 | 1.1 Video IO and shot detection | Done (shots for 9 train fights) |
-| 1 | 1.2 Detection and tracking | Not started |
+| 1 | 1.2 Detection and tracking | Done (stand-up stable; clinch/ground to 1.3) |
 | 1 | 1.3 Identity: ref filter and red/blue | Not started |
 | 1 | 1.4 Pose extraction and caching | Not started |
 | 1 | 1.5 Overlay renderer v1 + benchmark | Not started |
@@ -29,7 +29,7 @@ Claude Code updates this file at the end of every ROADMAP section. Newest entrie
 | 7 | 7.1 Repo polish | Not started |
 
 ## Key numbers
-- Pipeline speed (fps on RTX 2080): -
+- Pipeline speed (fps on RTX 2080): person detection 20-23 fps (YOLOX-m, ~45 ms/frame, about half of it the in-model NMS). Tracking + 1080p decode + debug render: 13-16 fps end to end.
 - Shot detection (CPU decode): ~190 fps at 1080p30, ~110 fps at 60 fps. All 9 train fights: ~38 min.
 - Labeled positives: eye_poke - / low_blow - / open_hand -
 - Fights: train 9 / val 4 / test 2 (8 foul, 5 clean, 2 test). Known fouls: 16 (`labels/notes/known_fouls.csv`)
@@ -38,6 +38,8 @@ Claude Code updates this file at the end of every ROADMAP section. Newest entrie
 - Test metrics: -
 
 ## Open issues
+- **Detection speed:** ~20 fps means ~35 min of detection per 25-min fight before pose. Fine overnight; options for 1.4/1.5 if needed: detect every 2nd frame, fp16, or a lower NMS candidate cap.
+- **Clinch and ground tracking** (1.2): a tied-up pair is often one merged box, so IDs split in clinches (golden_04: 10-12 tracks per shot). On the ground, lying fighters have short boxes, so seated cageside officials pass the relative-height filter and get tracked. The ref gets a new ID each time he leaves and re-enters the frame. All for 1.3 (profiles + ref filter).
 - openmmlab's model server throttles to ~100 KB/s per connection. On a new machine, pre-download the two model zips from rtmlib's Hugging Face mirror (see the 0.1 log entry).
 - **6 unofficial uploads** (Aspinall-Gane, Battle-Loosa, Garbrandt-Long, Holland-Malott, Munhoz-O'Malley, Edwards-Muhammad). Accepted for now; ask Cowork for official replacements in a data round. They can vanish or be re-uploaded with a different cut, which would break every timestamp for that fight. If a URL is swapped, the fight's window and known fouls have to be re-timed.
 - Edwards-Muhammad is 480p (under the 720p bar). Kept for train; drop it if pose is poor in 1.4.
@@ -58,6 +60,55 @@ All work is on the RTX 2080 PC for now. When Ari moves to the 4090 PC (or any ne
 7. `deepfoul fetch` to rebuild `data/raw/` from `labels/fights.csv`.
 
 ## Log
+
+### 2026-11-19 · Section 1.2 · Detection and tracking
+**Built:**
+- `labels/golden.csv`: Ari's 6 golden clips (in seconds). Golden 5 was shifted to 11:10-11:30 (670-690 s) because 11:17-11:37 ran past Magomedov-Petrosyan's `action_end_s` (690); the fight window was left alone. `tests/test_golden.py` checks the schema, train split, length and that each clip is inside its fight window.
+- `src/deepfoul/perception/detect.py`: `PersonDetector`, rtmlib's YOLOX (same model file as `Wholebody`, from the profile's `pose_mode`) via rtmlib's own `preprocess` + `inference`, then `parse_dets` reads the model's `[1, N, 5]` output and **keeps the scores**.
+- `src/deepfoul/perception/filters.py`: `drop_reasons` with 5 loose rules (`small`, `rel_small`, `high`, `edge`, `max_people`), thresholds in `tracking.filters`.
+- `src/deepfoul/perception/track.py`: `track_stream` (detect -> filter -> ByteTrack per frame, in order) and `track_clip`. The tracker resets on every shot change; frames `cut-1` and `cut` are guard frames (detected and drawn, not fed to the tracker). Track ids are `<shot_id>-<local_id>`.
+- `src/deepfoul/viz/debug_render.py` (supervision box/label annotators, unconfirmed boxes white, dropped boxes grey with the rule name, `mm:ss.cc f<idx> shot N` and `CUT` on guard frames) and `viz/track_report.py`.
+- `io/previews.py`: the ffmpeg pipe is now a shared `clip_writer` (used by golden previews and debug renders).
+- CLI `deepfoul track-golden [--only id] [--no-render] [--no-checks]`: renders to `outputs/renders/1.2/`, every detection to `data/cache/golden/<id>_tracks.parquet` (with `kept`, `drop_reason`, `guard`; `track_id` empty for dropped/unconfirmed boxes, for 1.3's ref filter tuning), and `outputs/renders/1.2/report.md`.
+- Config: `det.score_min`, `tracking.{cut_guard_frames, bytetrack, filters, checks}`. 3 extra check spans: Munhoz-O'Malley 04:10-04:40, Jandiroba-Dern 02:30-03:00 and 08:40-09:10 (the only non-golden train fights allowed).
+- 7 new tests (64 total): detector parsing, each filter rule, guard frames, and the reset/guard/id logic with a fake detector and the real ByteTrack.
+
+**Decisions:**
+- **ByteTrack from Roboflow `trackers` 2.7.0** (Apache-2.0): supervision 0.32 no longer ships ByteTrack. Checked before coding: no torch in its base install (`uv tree`), license in its METADATA, API read from the installed source (`update` returns boxes in a different order with `tracker_id=-1` for unconfirmed tracks, so a `det_idx` column maps them back; `reset()` restarts ids from 0). CLAUDE.md stack table updated. Supervision stays for drawing.
+- **rtmlib score workaround:** `YOLOX.__call__` returns boxes only and drops scores under 0.3. The bundled YOLOX ONNX has NMS inside, so we read its `dets` ourselves with `score_min` 0.1 (ByteTrack's second pass uses low-score boxes). Parsed boxes are identical to rtmlib's on a test frame.
+- **Relative-height rule added** (`rel_small`: shorter than 0.4x the tallest box scoring >= 0.5). Without it, tight broadcast shots tracked background crowd (golden_03: 38 tracks in 4 shots -> 14). Absolute rules stay loose (`min_height_frac` 0.10, `min_bottom_frac` 0.35, `max_people` 6) per Ari.
+- ByteTrack in fixed-rate mode (frames are fed strictly in order): `lost_track_buffer` 30, activation 0.5, high-conf 0.5, min IoU 0.1, 2 frames to confirm.
+- **Lookahead note:** guard frame `cut-1` needs to know the next frame is a cut, i.e. 1 frame of lookahead. That's inside the 2.0 s rule; a live version needs a 1-frame delay or must drop that guard.
+- The humanart YOLOX boxes are ~20% larger than the person (centred on them). It's the model, not our parsing (rtmlib gives the same boxes). Consistent, so fine for tracking; the "high" rule uses the box bottom, which sits a bit below the feet.
+
+**Verified:**
+- `deepfoul doctor`: CUDA still active after adding `trackers`; detector session on `CUDAExecutionProvider`.
+- `deepfoul track-golden`: 6 renders + 3 checks + report. Contact sheets (6-12 frames each) of all 6 golden renders and all 3 checks, checked by eye:
+
+  | Clip | Result |
+  |---|---|
+  | golden_01 Battle-Loosa (poke) | Both fighters keep one ID per shot (336/326 of 337 frames). The ref walks in front of the camera and gets a new ID per re-entry. |
+  | golden_02 Holland-Malott (low blow) | 3 full tracks (2 fighters + ref) in every shot. |
+  | golden_03 O'Malley-Vera (stand-up) | Fighters full in every shot; extra tracks are the ref entering. No crowd. |
+  | golden_04 Barber-Grasso (clinch) | Fighters often detected as one merged box: 10-12 tracks per shot. Ref tracked. Cageside judges dropped. |
+  | golden_05 Magomedov-Petrosyan (ref steps in) | Fighters full through the shot (558/555 of 572 frames), ref tracked when he steps in. |
+  | golden_06 Barber-Grasso (women's stand-up) | Fighters full in every shot, ref tracked. |
+  | check_01 Munhoz-O'Malley | Fighters full in all 5 shots. The ref is the third track wherever he's in frame (shots 11, 13-15), full in shot 15. |
+  | check_02/03 Jandiroba-Dern | Stand-up shots: 3 full tracks (17.5 s shot with 523/522/520 frames). Ground shots fragment, and seated cageside officials get tracked. |
+
+  Boxes dropped only by `high`: 0 in every golden clip, 1 + 49 in the checks, all low-score crowd above the cage line in ground shots.
+- `uv run pytest`: 64 passed. `git status`: nothing under `data/` or `outputs/`.
+
+**Golden set:** baseline established.
+
+**Known issues:**
+- Clinch merges, ground shots and ref re-entry IDs (see Open issues). Not in the 1.2 Done criterion (stand-up), handed to 1.3.
+- Detection ~20 fps (see Open issues).
+- supervision prints `template_mgs` FutureWarnings on import. Harmless.
+
+**Next:**
+- Ari: watch every render in `outputs/renders/1.2/` (`report.md` links them) and write problems as `clip timestamp what happened` for the 1.3 kickoff.
+- Then section 1.3 (identity: ref filter and red/blue).
 
 ### 2026-11-19 · Section 1.1 · Video IO and shot detection
 **Built:**
