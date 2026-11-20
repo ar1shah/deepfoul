@@ -176,3 +176,58 @@ def write_preview_clip(video: Path, start_s: float, end_s: float, out: Path) -> 
             write(put_label(f.image, frame_label(f.t, f.idx), h / 720))
             n += 1
     return n
+
+
+def time_sheet(video: Path, times: list[float], out: Path, cols: int = 6,
+               tile_w: int = 400) -> None:
+    """Contact sheet of single frames at `times` (ffmpeg seeks), each labeled with its time."""
+    import cv2
+
+    from deepfoul.io.video import ffmpeg_frame
+
+    info = video_info(video)
+    tiles = []
+    for t in times:
+        img = ffmpeg_frame(video, t, info["width"], info["height"]).copy()
+        img = cv2.resize(img, (tile_w, round(img.shape[0] * tile_w / img.shape[1])))
+        tiles.append(put_label(img, fmt_ts(t), 0.6))
+    blank = np.zeros_like(tiles[0])
+    tiles += [blank] * (-len(tiles) % cols)
+    rows = [np.hstack(tiles[i:i + cols]) for i in range(0, len(tiles), cols)]
+    out.parent.mkdir(parents=True, exist_ok=True)
+    cv2.imwrite(str(out), np.vstack(rows), [cv2.IMWRITE_JPEG_QUALITY, 85])
+
+
+def shorts_similarity(red: str, blue: str, similar_pairs: list[list[str]]) -> str:
+    """'' if the main shorts colors are distinct, else why they look alike."""
+    from deepfoul.io.fights import shorts_names
+
+    r, b = (shorts_names(red) or [""])[0], (shorts_names(blue) or [""])[0]
+    if not r or not b:
+        return "missing"
+    if r == b:
+        return f"same main color ({r})"
+    if {r, b} in [set(p) for p in similar_pairs]:
+        return f"similar ({r} / {b})"
+    return ""
+
+
+def write_shorts_report(rows: list[dict[str, str]], similar_pairs: list[list[str]],
+                        images: set[str], path: Path) -> None:
+    lines = ["# Shorts colors (1.3)", "",
+             "Read from the broadcast trunk-color graphic where there is one. Main color first, "
+             "accents after `+`. Corners from UFC.com (`labels/notes/starter_fights.md`).", "",
+             "| fight_id | split | red corner | red shorts | blue corner | blue shorts | flag | image |",
+             "|---|---|---|---|---|---|---|---|"]
+    for r in rows:
+        fid = r["fight_id"].strip()
+        flag = shorts_similarity(r["red_shorts"], r["blue_shorts"], similar_pairs)
+        cross = [c for c, own in (("red", "red_shorts"), ("blue", "blue_shorts"))
+                 if c != (r[own].split("+")[0].strip() or c) and
+                 (r["blue_shorts" if c == "red" else "red_shorts"].split("+")[0].strip() == c)]
+        notes = [flag] + (["shorts color = opposite corner"] if cross else [])
+        img = f"[{fid}.jpg]({fid}.jpg)" if fid in images else "-"
+        lines.append(f"| {fid} | {r['split']} | {r['red_fighter']} | {r['red_shorts']} | "
+                     f"{r['blue_fighter']} | {r['blue_shorts']} | {'; '.join(n for n in notes if n) or ''} | {img} |")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")

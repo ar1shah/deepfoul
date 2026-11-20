@@ -2,9 +2,9 @@ import csv
 
 import pytest
 
-from deepfoul.config import repo_root
+from deepfoul.config import load_config, repo_root
 from deepfoul.io.fetch import read_fights
-from deepfoul.io.fights import parse_mmss, validate_fights, window
+from deepfoul.io.fights import parse_mmss, shorts_names, validate_fights, window
 
 GOOD = {"fight_id": "ufc276_munhoz_omalley", "date": "2022-07-02", "split": "train",
         "source_url": "https://www.youtube.com/watch?v=e6DTwSONguQ",
@@ -52,7 +52,17 @@ def test_duplicates_and_blanks():
 
 def test_committed_fights_csv_is_valid():
     rows = read_fights(repo_root() / "labels" / "fights.csv")
-    assert rows and validate_fights(rows) == []
+    colors = set(load_config()["identity"]["colors"])
+    assert rows and validate_fights(rows, colors) == []
+
+
+def test_shorts_names_and_validation():
+    assert shorts_names(" Black+Gold ") == ["black", "gold"]
+    assert shorts_names("") == []
+    colors = {"black", "gold", "red"}
+    assert validate_fights([{**GOOD, "red_shorts": "black+gold", "blue_shorts": "red"}], colors) == []
+    probs = validate_fights([{**GOOD, "red_shorts": "teal"}], colors)
+    assert len(probs) == 1 and "red_shorts" in probs[0]
 
 
 def test_known_fouls_inside_fight_windows():
@@ -71,3 +81,13 @@ def test_known_fouls_inside_fight_windows():
         assert {foul["offender"], foul["victim"]} == {"red", "blue"}
         assert foul["ref_paused"] in {"yes", "no"}
         assert foul["visibility"] in {"clear_live", "hard_live"}
+
+
+def test_shorts_similarity():
+    from deepfoul.io.previews import shorts_similarity
+
+    pairs = [["black", "gray"], ["black", "navy"]]
+    assert shorts_similarity("black+gold", "green", pairs) == ""
+    assert "same" in shorts_similarity("black", "black+white", pairs)
+    assert "similar" in shorts_similarity("gray", "black", pairs)
+    assert shorts_similarity("", "black", pairs) == "missing"

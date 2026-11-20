@@ -77,3 +77,25 @@ tracking:
     - {check_id: check_01, fight_id: ufc276_munhoz_omalley, start_s: 250, end_s: 280}
     - {check_id: check_02, fight_id: ufc321_jandiroba_dern, start_s: 150, end_s: 180}
     - {check_id: check_03, fight_id: ufc321_jandiroba_dern, start_s: 520, end_s: 550}
+
+# Identity, 1.3. Shorts color names used in fights.csv red_shorts / blue_shorts, as OpenCV HSV
+# ranges (H 0-179, S and V 0-255). A name may carry accents after "+" (e.g. "black+gold"); only
+# the first name is the main color. Several ranges per name are OR-ed (red wraps around H=0).
+identity:
+  colors:
+    black:  [[0, 0, 0, 179, 255, 60]]
+    white:  [[0, 0, 170, 179, 50, 255]]
+    gray:   [[0, 0, 61, 179, 50, 169]]
+    red:    [[0, 90, 60, 8, 255, 255], [170, 90, 60, 179, 255, 255]]
+    orange: [[9, 100, 80, 20, 255, 255]]
+    gold:   [[18, 60, 60, 30, 255, 255]]
+    yellow: [[22, 100, 120, 34, 255, 255]]
+    green:  [[35, 50, 40, 85, 255, 255]]
+    blue:   [[95, 80, 80, 125, 255, 255]]
+    navy:   [[100, 60, 20, 130, 255, 110]]
+    purple: [[126, 50, 40, 155, 255, 255]]
+    pink:   [[150, 40, 120, 172, 255, 255]]
+    brown:  [[5, 60, 30, 20, 255, 140]]
+  # Pairs flagged as "similar" in the shorts report (besides identical main colors).
+  similar_pairs: [[black, navy], [black, gray], [navy, blue], [red, orange], [red, pink],
+                  [orange, gold], [gold, yellow], [purple, pink], [white, gray], [brown, black]]

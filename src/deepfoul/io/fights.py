@@ -36,8 +36,16 @@ def window(row: dict[str, str]) -> tuple[float | None, float | None]:
     return f("action_start_s"), f("action_end_s")
 
 
-def validate_fights(rows: list[dict[str, str]]) -> list[str]:
-    """Return a list of human-readable problems (empty if all rows are fine)."""
+def shorts_names(value: str) -> list[str]:
+    """'black+gold' -> ['black', 'gold'] (main color first); '' -> []."""
+    return [p.strip() for p in (value or "").strip().lower().split("+") if p.strip()]
+
+
+def validate_fights(rows: list[dict[str, str]], colors: set[str] | None = None) -> list[str]:
+    """Return a list of human-readable problems (empty if all rows are fine).
+
+    colors: allowed shorts color names (identity.colors); None skips that check.
+    """
     problems: list[str] = []
     seen: set[str] = set()
     for i, row in enumerate(rows, start=2):  # line 1 is the header
@@ -59,6 +67,11 @@ def validate_fights(rows: list[dict[str, str]]) -> list[str]:
         url = (row.get("source_url") or "").strip()
         if url and not URL_RE.match(url):
             problems.append(f"{where}: source_url is not a YouTube link")
+        if colors is not None:
+            for col in ("red_shorts", "blue_shorts"):
+                bad = [n for n in shorts_names(row.get(col, "")) if n not in colors]
+                if bad:
+                    problems.append(f"{where}: {col} has unknown color(s) {bad}")
         try:
             start, end = window(row)
         except ValueError:

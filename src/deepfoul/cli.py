@@ -344,10 +344,6 @@ def pose_check(
     typer.echo(f"saved {out}")
 
 
-if __name__ == "__main__":
-    app()
-
-
 @app.command("track-golden")
 def track_golden(
     only: list[str] = typer.Option(None, "--only", help="Only these golden event_ids / check_ids."),
@@ -412,3 +408,62 @@ def track_golden(
     report = out_dir / "report.md"
     write_report(summaries, report, f"{gpu} ({vram} GB)" if gpu else "none", detector.providers)
     typer.echo(f"report -> {report}")
+
+
+@app.command("shorts-check")
+def shorts_check(
+    fight_ids: list[str] = typer.Argument(None, help="fight_ids (default: every fight)."),
+    before: float = typer.Option(180, "--before", help="Seconds before action_start_s."),
+    after: float = typer.Option(60, "--after", help="Seconds after action_start_s."),
+    step: float = typer.Option(5, "--step", help="Seconds between sheet frames."),
+    save: list[str] = typer.Option(None, "--save", help="fight_id=mm:ss.cc: save that full frame "
+                                   "to outputs/shorts_check/<fight_id>.jpg instead of a sheet."),
+) -> None:
+    """Contact sheets around round 1 for reading shorts colors (outputs/shorts_check/sheets/)."""
+    import cv2
+    import numpy as np
+
+    from deepfoul.io.fights import window
+    from deepfoul.io.previews import time_sheet
+    from deepfoul.io.video import ffmpeg_frame, video_info
+
+    cfg = load_config()
+    out_dir = cfg["paths"]["outputs"] / "shorts_check"
+    if save:
+        for item in save:
+            fid, _, ts = item.partition("=")
+            m, _, s = ts.partition(":")
+            t = int(m) * 60 + float(s)
+            video = cfg["paths"]["raw"] / f"{fid}.mp4"
+            info = video_info(video)
+            img = ffmpeg_frame(video, t, info["width"], info["height"])
+            out_dir.mkdir(parents=True, exist_ok=True)
+            cv2.imwrite(str(out_dir / f"{fid}.jpg"), np.ascontiguousarray(img))
+            typer.echo(f"{fid} {ts} -> {out_dir / f'{fid}.jpg'}")
+        _shorts_report(cfg, out_dir)
+        return
+    for row in _fight_rows(fight_ids or []):
+        fid = row["fight_id"].strip()
+        video = cfg["paths"]["raw"] / f"{fid}.mp4"
+        if not video.exists():
+            typer.secho(f"{fid}: no video", fg="red", err=True)
+            continue
+        start = window(row)[0] or 0.0
+        times = list(np.arange(max(0.0, start - before), start + after, step))
+        time_sheet(video, times, out_dir / "sheets" / f"{fid}.jpg")
+        typer.echo(f"{fid}: {len(times)} frames")
+    _shorts_report(cfg, out_dir)
+
+
+def _shorts_report(cfg: dict, out_dir: Path) -> None:
+    from deepfoul.io.fetch import read_fights
+    from deepfoul.io.previews import write_shorts_report
+
+    rows = read_fights(cfg["paths"]["labels"] / "fights.csv")
+    images = {p.stem for p in out_dir.glob("*.jpg")}
+    write_shorts_report(rows, cfg["identity"]["similar_pairs"], images, out_dir / "report.md")
+    typer.echo(f"report -> {out_dir / 'report.md'}")
+
+
+if __name__ == "__main__":
+    app()
