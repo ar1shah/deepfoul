@@ -1,1 +1,7 @@
 event_id,fight_id,start_s,end_s,foul_type,offender,contact,ref_stopped,speed,source,notes
+golden_01,ufcfn20240316_battle_loosa,479,499,eye_poke,red,yes,yes,live,full_fight,eye poke (known foul 489 s)
+golden_02,ufcfn20251018_holland_malott,292,312,low_blow,blue,yes,yes,live,full_fight,low blow 1 of 2 (known foul 302 s)
+golden_03,ufc299_omalley_vera,529,559,clean,none,no,no,live,full_fight,clean stand-up exchange
+golden_04,ufc258_barber_grasso,836,856,clean,none,no,no,live,full_fight,clinch against cage
+golden_05,ufc308_magomedov_petrosyan,670,690,clean,none,no,yes,live,full_fight,ref stepping in (shifted from 11:17-11:37 to stay inside the fight window)
+golden_06,ufc258_barber_grasso,510,530,clean,none,no,no,live,full_fight,women's stand-up exchange
