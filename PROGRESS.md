@@ -9,7 +9,7 @@ Claude Code updates this file at the end of every ROADMAP section. Newest entrie
 | 0 | 0.2 Starter fights | Done (15/15 downloaded) |
 | 1 | 1.1 Video IO and shot detection | Done (shots for 9 train fights) |
 | 1 | 1.2 Detection and tracking | Done (stand-up stable; clinch/ground to 1.3) |
-| 1 | 1.3 Identity: ref filter and red/blue | Not started |
+| 1 | 1.3 Identity: ref filter and red/blue | In progress (paused after step 1, shorts colors) |
 | 1 | 1.4 Pose extraction and caching | Not started |
 | 1 | 1.5 Overlay renderer v1 + benchmark | Not started |
 | 2 | 2.1 Labeling app | Not started |
@@ -60,6 +60,33 @@ All work is on the RTX 2080 PC for now. When Ari moves to the 4090 PC (or any ne
 7. `deepfoul fetch` to rebuild `data/raw/` from `labels/fights.csv`.
 
 ## Log
+
+### 2026-11-20 · Section 1.3 · Identity (paused at step 1, the shorts-colors pause point)
+**Approved plan:** `C:\Users\AriSh\.claude\plans\read-claude-md-roadmap-md-and-dazzling-moth.md` (local to the 2080 PC). Its key points, so a fresh session can continue:
+- **Identity from appearance, not carried IDs:** each kept box is matched against fight-level profiles (red / blue / ref), then labelled red, blue, ref, merged or none. ByteTrack tracklets are only used to smooth labels (±0.5 s majority vote, and a tracklet is split on a stable label flip).
+- **Pose-guided regions** (shorts = hips to 40% of the way to the knees, torso, shins = knees to ankles, skin reference from the cheeks). RTMW runs **once per kept box** (never on filtered boxes), is cached, and is reused by 1.4. `--from-cache` re-runs identity without the GPU.
+- **Ref:** mainly clothed shins (vs the person's own face skin) plus a learned ref profile. "Torso isn't skin" only counts for men (women fighters wear tops). Fallback: with exactly 3 people, the third is the ref.
+- **Merged clinch box:** labelled `merged` (red+blue), not split.
+- **Profiles:** seeded from the shorts color names, then refined on the first ~60 s of the fight. report.md warns if they drift far from the seed or look swapped.
+- **`id-golden` command:** renders to `outputs/renders/1.3/`, nothing drawn on the ref unless `--show-ref` is passed. The report carries a per-clip ref check (golden 4/6 called out) and a table of Ari's 1.2 issues #2 to #8.
+- **For 1.4:** record det + pose fps and how long one 15-min fight takes.
+
+**Ari's 1.2 tracking issues** (original-video time):
+- **#2** golden_01 08:12: the ref walks in front of Battle, takes his ID, and Battle gets a new one.
+- **#3** golden_02 04:58: Holland and the ref swap IDs at a cut.
+- **#4** golden_03 08:53: Vera and O'Malley swap mid-shot, then swap back at 09:09.
+- **#5** golden_04 14:03: after the angle change the clinch is one merged box.
+- **#6** golden_04 from 14:03: crowd through the fence gets IDs, Barber and Grasso merge and swap, and the ref swaps with Grasso while walking in front of the camera.
+- **#7** golden_05 11:12: the ref gets a new ID after walking behind Shara.
+- **#8** golden_06 08:41: the fighters and the ref cycle IDs after an angle change, and they're fixed again at the 08:48 angle change.
+
+**Built so far (step 1):**
+- `deepfoul shorts-check [ids] [--before 180 --after 60 --step 5]` writes contact sheets to `outputs/shorts_check/sheets/`. `--save fight_id=mm:ss` saves the chosen frame to `outputs/shorts_check/<fight_id>.jpg`. Both write `outputs/shorts_check/report.md`.
+- `identity.colors` (named shorts colors as HSV ranges) and `identity.similar_pairs` in the config. `validate_fights(rows, colors)` checks the shorts names. Format: main color first, accents after `+`.
+- `red_shorts` / `blue_shorts` filled for all 15 fights, mostly from the broadcast trunk-color graphic. Barber-Grasso (2021) has no graphic, so I read it from the fighters (glove trim gives the corner). In two fights the shorts color is the opposite of the corner color: Garbrandt-Long (red corner wears blue) and Holland-Malott (red corner wears black, blue corner wears red).
+- **No truly similar-shorts fight.** The only flag is Barber-Grasso (light gray vs black), which is the stand-in for Done-when #2. It's also the women's fight, and the tops are reversed (Barber: black top + gray shorts, Grasso: white top + black shorts), so it tests that shorts are read from the right region. "Find a similar-shorts fight" is now a data-round task in ROADMAP.
+
+**Next:** Ari checks `outputs/shorts_check/` and replies `colors ok` or sends corrections. Then steps 2 to 6 of the plan (pose, appearance, profiles and assignment, renders and report, tests).
 
 ### 2026-11-19 · Section 1.2 · Detection and tracking
 **Built:**

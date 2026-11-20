@@ -226,6 +226,7 @@ Targets before Phase 5:
 
 **One round:**
 1. **Cowork:** "Find 5 to 10 more UFC full fights with documented eye pokes or low blows (plus 1 to 2 compilations), following the Footage guide in ROADMAP.md. Write them to `labels/fights_draft.csv` with the same columns as fights.csv, plus a notes file."
+   - **Open task (from 1.3):** at least one train fight where both fighters wear truly similar shorts (e.g. black vs navy, or both black with different trim). None of the 15 starter fights has one; 1.3 used the closest pair (Barber-Grasso, gray vs black) as a stand-in. Re-run the 1.3 identity check on it once it's in.
 2. **You:** review the draft like the starter list: foul visible, full fight, normal speed, official upload if possible. Note each fight's window (`fight_id mm:ss-mm:ss`) and every foul (time, type, offender, clear live or only in replay).
 3. **Claude Code** (short session): `Run deepfoul ingest on labels/fights_draft.csv with these fight windows: <paste>. Show me the ingest report.` For a big batch, run `uv run deepfoul ingest` yourself overnight instead.
 4. **You:** label the new queues:
