@@ -346,3 +346,69 @@ def pose_check(
 
 if __name__ == "__main__":
     app()
+
+
+@app.command("track-golden")
+def track_golden(
+    only: list[str] = typer.Option(None, "--only", help="Only these golden event_ids / check_ids."),
+    no_render: bool = typer.Option(False, "--no-render", help="Skip the debug videos."),
+    no_checks: bool = typer.Option(False, "--no-checks", help="Skip the extra check spans."),
+) -> None:
+    """Detect + track every golden clip (and the config's extra check spans).
+
+    Writes debug renders to outputs/renders/1.2/, every detection to
+    data/cache/golden/<id>_tracks.parquet, and outputs/renders/1.2/report.md.
+    """
+    import csv
+    import time
+
+    from deepfoul.io.fetch import read_fights
+    from deepfoul.io.shots import load_shots, shots_path
+    from deepfoul.perception.detect import PersonDetector
+    from deepfoul.perception.track import track_clip
+    from deepfoul.viz.track_report import clip_summary, write_report
+
+    cfg = load_config()
+    _init_ort()
+    gpu, vram = _gpu_info()
+    mode = cfg["profiles"][pick_profile(cfg, vram)]["pose_mode"]
+    device = cfg["device"] if cfg["device"] != "auto" else ("cuda" if gpu else "cpu")
+    detector = PersonDetector(mode, device, cfg["det"]["score_min"])
+    typer.echo(f"detector {mode} on {detector.providers[0]}")
+
+    fights = {r["fight_id"].strip(): r for r in read_fights(cfg["paths"]["labels"] / "fights.csv")}
+    with (cfg["paths"]["labels"] / "golden.csv").open(encoding="utf-8-sig", newline="") as f:
+        jobs = [(g["event_id"], g["fight_id"], float(g["start_s"]), float(g["end_s"]),
+                 f"{g['foul_type']}: {g['notes']}", True) for g in csv.DictReader(f)]
+    if not no_checks:
+        jobs += [(c["check_id"], c["fight_id"], float(c["start_s"]), float(c["end_s"]),
+                  c.get("note", "extra check"), False) for c in cfg["tracking"]["checks"]]
+    if only:
+        jobs = [j for j in jobs if j[0] in only]
+
+    out_dir = cfg["paths"]["outputs"] / "renders" / "1.2"
+    cache_dir = cfg["paths"]["cache"] / "golden"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    summaries = []
+    for clip_id, fid, start, end, note, golden in jobs:
+        shots_file = shots_path(cfg["paths"]["cache"], fid)
+        if not shots_file.exists():
+            typer.secho(f"{clip_id}: no shot file, run `deepfoul extract {fid} --shots`", fg="red")
+            continue
+        doc = load_shots(shots_file)
+        kind = note.split(":")[0].replace(" ", "_")
+        render = out_dir / f"{clip_id}_{fid}_{kind}.mp4" if golden and not no_render else None
+        t0 = time.perf_counter()
+        df, meta, det_s = track_clip(fights[fid], start, end, doc["shots"], doc["fps"], detector,
+                                     cfg, cfg["paths"]["raw"], render)
+        df.insert(0, "clip_id", clip_id)
+        df.to_parquet(cache_dir / f"{clip_id}_tracks.parquet", index=False)
+        s = clip_summary(clip_id, fid, start, end, note, df, meta, doc["fps"], det_s,
+                         render.name if render else None)
+        summaries.append(s)
+        typer.echo(f"{clip_id}: {len(meta)} frames, {sum(x['tracks'] for x in s['shots'])} tracks "
+                   f"in {len(s['shots'])} shots, det {s['det_fps']:.0f} fps, "
+                   f"{time.perf_counter() - t0:.0f}s")
+    report = out_dir / "report.md"
+    write_report(summaries, report, f"{gpu} ({vram} GB)" if gpu else "none", detector.providers)
+    typer.echo(f"report -> {report}")

@@ -6,6 +6,7 @@ import csv
 import itertools
 import statistics
 import subprocess
+from contextlib import contextmanager
 from pathlib import Path
 
 import numpy as np
@@ -140,29 +141,38 @@ def clip_name(fight_id: str, live_s: float, foul_type: str) -> str:
     return f"{fight_id}_{s // 60:02d}-{s % 60:02d}_{foul_type}.mp4"
 
 
-def write_preview_clip(video: Path, start_s: float, end_s: float, out: Path) -> int:
-    """Re-encode [start_s, end_s) of the raw video to `out` (H.264 + AAC) with the original
-    timestamp and frame index burned in. The raw file is only read. Returns frames written."""
+@contextmanager
+def clip_writer(video: Path, first_t: float, end_s: float, size: tuple[int, int], out: Path):
+    """Pipe BGR frames into an H.264 mp4 at the source frame rate, muxing the raw video's audio
+    from first_t to end_s. Yields a write(img) function. The raw file is only read."""
     info = video_info(video)
-    frames = iter_frames(video, start_s, end_s)
-    first = next(frames)
-    h, w = first.image.shape[:2]
+    w, h = size
     out.parent.mkdir(parents=True, exist_ok=True)
     cmd = ["ffmpeg", "-y", "-v", "error",
            "-f", "rawvideo", "-pix_fmt", "bgr24", "-s", f"{w}x{h}",
            "-r", info["r_frame_rate"] or str(info["fps"]), "-i", "-",
-           "-ss", f"{first.t:.6f}", "-t", f"{end_s - first.t:.6f}", "-i", str(video),
+           "-ss", f"{first_t:.6f}", "-t", f"{end_s - first_t:.6f}", "-i", str(video),
            "-map", "0:v", "-map", "1:a?",
            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
            "-c:a", "aac", "-b:a", "128k", "-shortest", str(out)]
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
-    n = 0
     try:
-        for f in itertools.chain([first], frames):
-            proc.stdin.write(put_label(f.image, frame_label(f.t, f.idx), h / 720).tobytes())
-            n += 1
+        yield lambda img: proc.stdin.write(np.ascontiguousarray(img).tobytes())
     finally:
         proc.stdin.close()
         if proc.wait() != 0:
             raise RuntimeError(f"ffmpeg failed writing {out}")
+
+
+def write_preview_clip(video: Path, start_s: float, end_s: float, out: Path) -> int:
+    """Re-encode [start_s, end_s) of the raw video to `out` (H.264 + AAC) with the original
+    timestamp and frame index burned in. The raw file is only read. Returns frames written."""
+    frames = iter_frames(video, start_s, end_s)
+    first = next(frames)
+    h, w = first.image.shape[:2]
+    n = 0
+    with clip_writer(video, first.t, end_s, (w, h), out) as write:
+        for f in itertools.chain([first], frames):
+            write(put_label(f.image, frame_label(f.t, f.idx), h / 720))
+            n += 1
     return n
