@@ -34,6 +34,9 @@ class FrameResult:
     rows: list[dict] = field(default_factory=list)
     det_s: float = 0.0
     image: np.ndarray | None = field(default=None, repr=False)  # the frame, for drawing
+    # pose on the kept boxes: (det_idx K, keypoints K x 133 x 2, scores K x 133), or None
+    pose: tuple | None = field(default=None, repr=False)
+    pose_s: float = 0.0
 
 
 def guard_frames(shots: list[dict], n: int) -> set[int]:
@@ -49,8 +52,13 @@ def make_tracker(bt_cfg: dict, fps: float):
 
 
 def track_stream(frames: Iterable, shots: list[dict], detect: Callable, tracker,
-                 filter_cfg: dict, guard_n: int = 1) -> Iterator[FrameResult]:
-    """Detect, filter and track each frame (objects with .idx, .t, .image) in order."""
+                 filter_cfg: dict, guard_n: int = 1,
+                 pose: Callable | None = None) -> Iterator[FrameResult]:
+    """Detect, filter and track each frame (objects with .idx, .t, .image) in order.
+
+    With `pose`, it also runs once per frame on the kept boxes only (guard frames included, so
+    every frame with a kept box has keypoints); filtered-out boxes never get pose.
+    """
     import supervision as sv
 
     guards = guard_frames(shots, guard_n)
@@ -82,7 +90,14 @@ def track_stream(frames: Iterable, shots: list[dict], detect: Callable, tracker,
                  "x1": float(b[0]), "y1": float(b[1]), "x2": float(b[2]), "y2": float(b[3]),
                  "score": float(s), "kept": bool(k), "drop_reason": r, "track_id": tid}
                 for i, (b, s, k, r, tid) in enumerate(zip(boxes, scores, kept, reasons, tids))]
-        yield FrameResult(f.idx, f.t, shot, guard, rows, det_s, f.image)
+        pose_out, pose_s = None, 0.0
+        if pose is not None:
+            keep_idx = np.flatnonzero(kept)
+            t1 = time.perf_counter()
+            k, sc = pose(f.image, boxes[keep_idx])
+            pose_s = time.perf_counter() - t1
+            pose_out = (keep_idx, k, sc)
+        yield FrameResult(f.idx, f.t, shot, guard, rows, det_s, f.image, pose_out, pose_s)
 
 
 
