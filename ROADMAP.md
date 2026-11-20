@@ -1,34 +1,40 @@
 # DeepFoul Roadmap
 
-## ▶ Now: 1.1 Video IO and shot detection
+## ▶ Now: 1.2 Detection and tracking
 
-**Kickoff prompt**
-```
-Read CLAUDE.md, ROADMAP.md and PROGRESS.md. Plan section 1.1 only. Wait for my approval before writing code.
-```
-
-**Claude Code does**
-1. Frame reader: yields frames in order with timestamps, supports start/end times and frame stride, and defaults to the fight window (`action_start_s` / `action_end_s`).
-2. PySceneDetect shot boundaries saved to `data/cache/<fight_id>_shots.json` via `deepfoul extract --shots <fight_id>`, only inside the fight window. Tracks reset at cuts.
-3. Run it on 2 train fights (one foul fight, one clean fight).
-4. Contact sheet of 20 detected cuts (the frame before and after each cut) in `outputs/shots_check/`.
-5. **Golden candidate clips:** for every `clear_live` foul in `labels/notes/known_fouls.csv` from a **train** fight, cut a short preview clip (5 s before to 5 s after the live time) into `outputs/golden_candidates/`, named `<fight_id>_<mm-ss>_<foul_type>.mp4`. These are previews only, never committed.
-
-**Done when**
-- Shot files exist for 2 fights, and the cut contact sheet and golden candidate clips are ready.
-
-**You do**
-1. Look at the cut contact sheet. Each pair should be two different camera angles. Note any fake cuts (same angle) or obvious missed cuts.
-2. **Pick the golden set** (10 to 30 s each, live speed, train fights only, no replays). Times are from the original video, as VLC shows them.
-   1. **Eye poke:** watch the poke previews in `outputs/golden_candidates/`. Best bets: Munhoz vs O'Malley (12:07) or Battle vs Loosa (08:09).
+**Before the kickoff (you, left over from 1.1)**
+1. Open `outputs/shots_check/` (two cut sheets + `report.md`). Each pair should be two different camera angles. I already checked all 20 by eye, so just note anything that looks off: fake cuts (same angle) or obvious missed cuts.
+2. **Pick the golden set** (10 to 30 s each, live speed, train fights only, no replays). Times are from the original video, as VLC shows them. The preview clips have the original time burned in at the top left (`mm:ss.cc  f<frame>`), so you can read times straight off them.
+   1. **Eye poke:** the poke previews in `outputs/golden_candidates/` (see `index.md`). Munhoz vs O'Malley (12:07) or Battle vs Loosa (08:09).
    2. **Low blow:** Holland vs Malott (05:02 or 05:52).
    3. **Clean stand-up exchange**, both fighters fully visible: O'Malley vs Vera or Magomedov vs Petrosyan.
    4. **Clinch against the cage:** Barber vs Grasso, or any train fight.
    5. **Ref stepping in** between the fighters (a break or a stoppage): any train fight.
    6. **(Bonus) women's stand-up exchange:** Barber vs Grasso.
-   Don't use Edwards vs Muhammad or Garbrandt vs Long (video quality), or any val or test fight.
+   Don't use Edwards vs Muhammad or Garbrandt vs Long (video quality), or any val or test fight. Avoid between-round segments (dissolves aren't detected as cuts).
    Format: `1. ufc276_munhoz_omalley 11:55-12:20 eye poke`
-3. Paste the cut issues and the golden list into the 1.2 kickoff prompt.
+
+**Kickoff prompt**
+```
+Read CLAUDE.md, ROADMAP.md and PROGRESS.md. Plan section 1.2 only. Wait for my approval before writing code.
+Shot detection issues from 1.1: <list or "none">.
+Golden set (write these to labels/golden.csv first):
+<paste your golden list>
+```
+
+**Claude Code does**
+1. Write the golden list to `labels/golden.csv` (converting mm:ss to seconds).
+2. Person detection (rtmlib YOLOX) + ByteTrack within each shot. Read frames with `iter_fight_frames` and reset the tracker whenever `shot_index_at_frame` changes (shot files are already cached for all 9 train fights). Treat cuts as ±1 frame: some uploads blend one frame across a cut.
+3. Filters: drop small boxes and boxes outside the cage area (crowd, camera crew). Thresholds in config.
+4. Debug renders (boxes + track IDs + timestamp) for every golden clip in `outputs/renders/1.2/`.
+
+**Done when**
+- On the golden clips, the 2 fighters and the ref each keep a stable track ID through stand-up exchanges, and the crowd isn't tracked.
+
+**You do**
+1. Watch every debug render.
+2. Write down each problem as `clip timestamp what happened` (e.g. `golden 2, 00:12, fighters swapped IDs in clinch`).
+3. Paste the list into the 1.3 kickoff prompt.
 
 ---
 
@@ -98,31 +104,7 @@ Variety: at least 2 women's fights, at least 1 fight with similar or dark shorts
 
 ## Phase 1: Perception pipeline (the "eyes")
 
-1.1 is in progress (see **Now** at the top).
-
-### 1.2 Detection and tracking
-
-**Kickoff prompt**
-```
-Read CLAUDE.md, ROADMAP.md and PROGRESS.md. Plan section 1.2 only. Wait for my approval before writing code.
-Shot detection issues from 1.1: <list or "none">.
-Golden set (write these to labels/golden.csv first):
-<paste your golden list>
-```
-
-**Claude Code does**
-1. Write the golden list to `labels/golden.csv` (converting mm:ss to seconds).
-2. Person detection (rtmlib YOLOX) + ByteTrack within each shot.
-3. Filters: drop small boxes and boxes outside the cage area (crowd, camera crew). Thresholds in config.
-4. Debug renders (boxes + track IDs + timestamp) for every golden clip in `outputs/renders/1.2/`.
-
-**Done when**
-- On the golden clips, the 2 fighters and the ref each keep a stable track ID through stand-up exchanges, and the crowd isn't tracked.
-
-**You do**
-1. Watch every debug render.
-2. Write down each problem as `clip timestamp what happened` (e.g. `golden 2, 00:12, fighters swapped IDs in clinch`).
-3. Paste the list into the 1.3 kickoff prompt.
+1.2 is in progress (see **Now** at the top).
 
 ### 1.3 Identity: ref filter and red/blue
 
@@ -519,6 +501,9 @@ uv project, `deepfoul doctor` / `fetch` / `pose-check`, label CSV headers, machi
 
 ### 0.2 Starter fights ✅
 15 fights in `labels/fights.csv` with fight windows (train 9 / val 4 / test 2), all downloaded. Known fouls in `labels/notes/known_fouls.csv` and `labels/notes/starter_fights.md`. `deepfoul fetch-check` writes `outputs/fetch_check/report.md` plus contact sheets. After 0.2, Kape vs Silva and Garbrandt vs Long swapped splits (Garbrandt's video is cropped and likely frame-interpolated, so it's in train now). Val = Cortes Acosta vs Delija, Kape vs Silva, Gaethje vs Holloway, Garry vs Prates.
+
+### 1.1 Video IO and shot detection ✅
+Frame reader (`iter_frames`, frame-exact vs ffmpeg on the 50 and 60 fps videos), shot files for all 9 train fights (AdaptiveDetector tuned to 2.0 / 30), `extract --shots`, `shots-check`, `golden-candidates` (4 clips with burned timestamps), `frame-check`. Found: Garbrandt-Long is 25 fps padded with duplicate frames, not interpolated; dissolves between rounds aren't detected as cuts.
 
 ---
 

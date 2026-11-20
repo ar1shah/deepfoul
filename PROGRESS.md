@@ -7,7 +7,7 @@ Claude Code updates this file at the end of every ROADMAP section. Newest entrie
 |---|---|---|
 | 0 | 0.1 Repo and environment | Done (RTX 2080) |
 | 0 | 0.2 Starter fights | Done (15/15 downloaded) |
-| 1 | 1.1 Video IO and shot detection | Not started |
+| 1 | 1.1 Video IO and shot detection | Done (shots for 9 train fights) |
 | 1 | 1.2 Detection and tracking | Not started |
 | 1 | 1.3 Identity: ref filter and red/blue | Not started |
 | 1 | 1.4 Pose extraction and caching | Not started |
@@ -30,6 +30,7 @@ Claude Code updates this file at the end of every ROADMAP section. Newest entrie
 
 ## Key numbers
 - Pipeline speed (fps on RTX 2080): -
+- Shot detection (CPU decode): ~190 fps at 1080p30, ~110 fps at 60 fps. All 9 train fights: ~38 min.
 - Labeled positives: eye_poke - / low_blow - / open_hand -
 - Fights: train 9 / val 4 / test 2 (8 foul, 5 clean, 2 test). Known fouls: 16 (`labels/notes/known_fouls.csv`)
 - Val fights: Cortes Acosta-Delija, Kape-Silva, Gaethje-Holloway, Garry-Prates (6 known fouls). Kape-Silva and Garbrandt-Long swapped splits after 0.2, because Garbrandt-Long's video is cropped and likely frame-interpolated.
@@ -40,7 +41,9 @@ Claude Code updates this file at the end of every ROADMAP section. Newest entrie
 - openmmlab's model server throttles to ~100 KB/s per connection. On a new machine, pre-download the two model zips from rtmlib's Hugging Face mirror (see the 0.1 log entry).
 - **6 unofficial uploads** (Aspinall-Gane, Battle-Loosa, Garbrandt-Long, Holland-Malott, Munhoz-O'Malley, Edwards-Muhammad). Accepted for now; ask Cowork for official replacements in a data round. They can vanish or be re-uploaded with a different cut, which would break every timestamp for that fight. If a URL is swapped, the fight's window and known fouls have to be re-timed.
 - Edwards-Muhammad is 480p (under the 720p bar). Kept for train; drop it if pose is poor in 1.4.
-- Garbrandt-Long is a Russian broadcast at 1694x1080, 60 fps (probably cropped and frame-interpolated). Munhoz-O'Malley is 50 fps.
+- Garbrandt-Long is a Russian broadcast at 1694x1080, 60 fps. 1.1 found it's a **25 fps source padded with duplicate frames** (58% of frames repeat the previous one), not interpolated. Motion features (3.2) must not read a zero velocity on a duplicate frame as "stopped". Munhoz-O'Malley is 50 fps with one-frame cross-blends at cuts.
+- Shot detection misses **dissolves** (gradual transitions). They only showed up in between-round segments (Garbrandt 12:16-13:36, Holland 20:13-21:13), which 4.2 skips.
+- Slow-motion replays can fire bursts of fake cuts (Battle-Loosa 09:40-09:43, 4 shots under 1 s). Replays are tagged in 4.2.
 - Jandiroba-Dern has a sponsor overlay (bottom right) burned into the official UFC upload.
 - No Gane-Hokit (UFC 334) row yet; add it once a video exists. No similar-shorts fight confirmed yet.
 
@@ -55,6 +58,81 @@ All work is on the RTX 2080 PC for now. When Ari moves to the 4090 PC (or any ne
 7. `deepfoul fetch` to rebuild `data/raw/` from `labels/fights.csv`.
 
 ## Log
+
+### 2026-11-19 · Section 1.1 · Video IO and shot detection
+**Built:**
+- `src/deepfoul/io/video.py`:
+  - `iter_frames(path, start_s, end_s, stride)` yields `Frame(idx, t, image)` in order. It covers half-open `[start, end)` and seeks 2 s early, then decodes forward to the exact first frame at or after `start`.
+  - `t` is the original-file time from the container pts, and `idx` is the frame index in the original file.
+  - `iter_fight_frames(row, ...)` defaults to, and clamps to, the fight window.
+  - `video_info` reports `start_time`, `r_frame_rate` and `avg_frame_rate`, and flags a nonzero start or VFR.
+  - `frame_check` compares the reader against ffmpeg.
+- `src/deepfoul/io/shots.py`: PySceneDetect AdaptiveDetector over the fight window, cached to `data/cache/<fight_id>_shots.json`.
+  - Shots are **half-open** `[start_frame, end_frame)`, so a frame exactly at a cut belongs to the new shot.
+  - `min_scene_len_s` is converted with each video's own fps.
+  - `shot_index_at_frame` / `shot_index_at` is the hook 1.2 uses to reset tracks when the shot id changes.
+  - Optional `shots.per_fight` overrides (currently empty) and a `content` detector option.
+- `src/deepfoul/io/previews.py`: cut contact sheets, the shots report, and golden preview clips.
+- CLI:
+  - `deepfoul extract <ids...> | --split train --shots [--force]`: if the cached detector params, scenedetect version or fight window no longer match, it re-runs automatically and prints why.
+  - `deepfoul shots-check <ids...> [--n 20]`
+  - `deepfoul golden-candidates`
+  - `deepfoul frame-check <id> [--t ...]`
+- 12 new tests (55 total), on a synthetic video with known cuts.
+
+**Decisions:**
+- **Detector params tuned:** `adaptive_threshold` 3.0 → 2.0 and `min_content_val` 15 → 30, checked by eye on 5 fights:
+
+  | Span | Defaults | Tuned |
+  |---|---|---|
+  | Garbrandt 400-520 s | 35 cuts, 25 fake | 10 cuts, all real |
+  | Battle-Loosa 240-340 + 470-520 s | 5 real missed, 8 fake | 0 missed, 0 fake |
+  | Munhoz 140-330 s | 3 missed | 0 missed, 0 fake |
+  | Magomedov 10-190 s | 1 missed | 0 missed |
+  | Holland 300-400 s | 2 missed | 0 missed |
+
+  - Real cuts have a mean pixel diff (before → after) of 31 to 170. Fakes have 2 to 16.
+  - Garbrandt's fakes came from its duplicate frames.
+  - Battle-Loosa's fakes came from 1.33 s compression pulses in the re-encode, and its real cuts were missed because the noisy upload has a high baseline frame diff.
+  - One global setting fixed both, so no per-fight override was needed. ContentDetector was tried for Garbrandt and dropped.
+- Shot detection decodes from frame 0 instead of seeking, so PySceneDetect's frame numbers match the file exactly. Cuts before the window start are dropped.
+- The frame reader uses OpenCV (pts time) and checks itself against ffmpeg. PyAV is installed but wasn't needed.
+- Golden candidates skip Garbrandt-Long and Edwards-Muhammad (video quality), which leaves 4 clips. Clips cover ±10 s with the original audio, and the original time and frame index are burned in (`12:07.48  f36274`).
+- Integer times in PySceneDetect mean *frames*, not seconds. All calls pass floats.
+
+**Verified:**
+- **Frame timing vs ffmpeg** (`deepfoul frame-check`), 5 off-grid times per video:
+  - Munhoz-O'Malley (50 fps): mean abs pixel diff vs ffmpeg 0.00 at all 5. Neighbouring frames differ by 1.6 to 15.8, so the check really separates frames. Seek-then-decode equals decode-from-10-s-earlier (diff 0.00, same `t`).
+  - Garbrandt-Long (60 fps): diff 0.00 at all 5, and seek equals linear decode. Because of the duplicate frames, ±1 frame is sometimes identical, so at those times only "not 2 frames off" is provable. At 709 s and 1311 s, +1 is clearly different (8.0, 11.9).
+  - `video_info`: both have `start_time` 0, `r_frame_rate` = `avg_frame_rate`, and no flags.
+- **Shots:** files for all 9 train fights:
+
+  | Fight | Shots | Median |
+  |---|---|---|
+  | Garbrandt-Long | 150 | 6.0 s |
+  | Holland-Malott | 193 | 5.5 s |
+  | Battle-Loosa | 49 | 9.3 s |
+  | Munhoz-O'Malley | 60 | 9.0 s |
+  | Edwards-Muhammad | 42 | 8.6 s |
+  | Magomedov-Petrosyan | 66 | 7.1 s |
+  | Jandiroba-Dern | 204 | 5.6 s |
+  | Barber-Grasso | 94 | 7.3 s |
+  | O'Malley-Vera | 182 | 6.4 s |
+
+- **Contact sheets** (Munhoz-O'Malley, Magomedov-Petrosyan, 10 cuts each): I checked all 20 by eye. All are real angle changes or replay wipes.
+- **Golden candidates:** 4 clips (Holland 05:02 and 05:52, Battle 08:09, Munhoz 12:07), 20 s each, H.264 + AAC. At 2 points per clip, the clip frame decoded by ffmpeg matches the raw frame at the same time (diff ~2.4, H.264 loss) better than ±1 frame (6 to 18). The burned labels read correctly (e.g. `05:02.00 f9060`).
+- `uv run pytest`: 55 passed. `git status`: nothing under `data/` or `outputs/`.
+
+**Golden set:** n/a (picked by Ari after this section).
+
+**Known issues:**
+- Dissolves between rounds are missed, and slow-motion replays give fake cuts (see Open issues). Neither affects live fighting.
+- Munhoz-O'Malley's one-frame cross-blends at cuts can land on either side of the cut. 1.2 should treat a cut as ±1 frame, e.g. by not starting new tracks on the blend frame.
+- Short shots at the edges of the window (e.g. Garbrandt 00:40.00-00:40.37) are window slivers, not fake cuts.
+
+**Next:**
+- Ari: look at `outputs/shots_check/` (2 sheets + `report.md`) and pick the golden set from `outputs/golden_candidates/` (see ROADMAP 1.1 "You do").
+- Then section 1.2 (detection and tracking).
 
 ### 2026-11-19 · Section 0.2 · Starter fights
 **Built:**
