@@ -9,7 +9,7 @@ Claude Code updates this file at the end of every ROADMAP section. Newest entrie
 | 0 | 0.2 Starter fights | Done (15/15 downloaded) |
 | 1 | 1.1 Video IO and shot detection | Done (shots for 9 train fights) |
 | 1 | 1.2 Detection and tracking | Done (stand-up stable; clinch/ground to 1.3) |
-| 1 | 1.3 Identity: ref filter and red/blue | In progress (paused after step 1, shorts colors) |
+| 1 | 1.3 Identity: ref filter and red/blue | Done (stand-up and cuts correct; golden_04 clinch partly wrong, see log) |
 | 1 | 1.4 Pose extraction and caching | Not started |
 | 1 | 1.5 Overlay renderer v1 + benchmark | Not started |
 | 2 | 2.1 Labeling app | Not started |
@@ -29,7 +29,7 @@ Claude Code updates this file at the end of every ROADMAP section. Newest entrie
 | 7 | 7.1 Repo polish | Not started |
 
 ## Key numbers
-- Pipeline speed (fps on RTX 2080): person detection 20-23 fps (YOLOX-m, ~45 ms/frame, about half of it the in-model NMS). Tracking + 1080p decode + debug render: 13-16 fps end to end.
+- Pipeline speed (fps on RTX 2080): person detection 20-23 fps (YOLOX-m, ~45 ms/frame, about half of it the in-model NMS). Tracking + 1080p decode + debug render: 13-16 fps end to end. Detect + track + RTMW pose (batched, 2.8 boxes/frame): 10.5 fps, so ~43 min per 15-min fight at 30 fps.
 - Shot detection (CPU decode): ~190 fps at 1080p30, ~110 fps at 60 fps. All 9 train fights: ~38 min.
 - Labeled positives: eye_poke - / low_blow - / open_hand -
 - Fights: train 9 / val 4 / test 2 (8 foul, 5 clean, 2 test). Known fouls: 16 (`labels/notes/known_fouls.csv`)
@@ -39,7 +39,7 @@ Claude Code updates this file at the end of every ROADMAP section. Newest entrie
 
 ## Open issues
 - **Detection speed:** ~20 fps means ~35 min of detection per 25-min fight before pose. Fine overnight; options for 1.4/1.5 if needed: detect every 2nd frame, fp16, or a lower NMS candidate cap.
-- **Clinch and ground tracking** (1.2): a tied-up pair is often one merged box, so IDs split in clinches (golden_04: 10-12 tracks per shot). On the ground, lying fighters have short boxes, so seated cageside officials pass the relative-height filter and get tracked. The ref gets a new ID each time he leaves and re-enters the frame. All for 1.3 (profiles + ref filter).
+- **Clinch identity** (1.3): a tied-up pair is labelled `merged` (no per-fighter pose). In golden_04 the detector sometimes gives a wide pair box plus a fragment, and seated cageside officials sometimes get a corner label. Candidate for 4.1 "ID handling in clinches". Ref re-entries and cuts are solved by fight-wide profiles.
 - openmmlab's model server throttles to ~100 KB/s per connection. On a new machine, pre-download the two model zips from rtmlib's Hugging Face mirror (see the 0.1 log entry).
 - **6 unofficial uploads** (Aspinall-Gane, Battle-Loosa, Garbrandt-Long, Holland-Malott, Munhoz-O'Malley, Edwards-Muhammad). Accepted for now; ask Cowork for official replacements in a data round. They can vanish or be re-uploaded with a different cut, which would break every timestamp for that fight. If a URL is swapped, the fight's window and known fouls have to be re-timed.
 - Edwards-Muhammad is 480p (under the 720p bar). Kept for train; drop it if pose is poor in 1.4.
@@ -47,7 +47,7 @@ Claude Code updates this file at the end of every ROADMAP section. Newest entrie
 - Shot detection misses **dissolves** (gradual transitions). They only showed up in between-round segments (Garbrandt 12:16-13:36, Holland 20:13-21:13), which 4.2 skips.
 - Slow-motion replays can fire bursts of fake cuts (Battle-Loosa 09:40-09:43, 4 shots under 1 s). Replays are tagged in 4.2.
 - Jandiroba-Dern has a sponsor overlay (bottom right) burned into the official UFC upload.
-- No Gane-Hokit (UFC 334) row yet; add it once a video exists. No similar-shorts fight confirmed yet.
+- No Gane-Hokit (UFC 334) row yet; add it once a video exists. No truly similar-shorts fight yet (Barber-Grasso grey vs black is the stand-in); a data-round task.
 
 ## Switching machines (later, not now)
 All work is on the RTX 2080 PC for now. When Ari moves to the 4090 PC (or any new Windows PC):
@@ -61,32 +61,88 @@ All work is on the RTX 2080 PC for now. When Ari moves to the 4090 PC (or any ne
 
 ## Log
 
-### 2026-11-20 · Section 1.3 · Identity (paused at step 1, the shorts-colors pause point)
-**Approved plan:** `C:\Users\AriSh\.claude\plans\read-claude-md-roadmap-md-and-dazzling-moth.md` (local to the 2080 PC). Its key points, so a fresh session can continue:
-- **Identity from appearance, not carried IDs:** each kept box is matched against fight-level profiles (red / blue / ref), then labelled red, blue, ref, merged or none. ByteTrack tracklets are only used to smooth labels (±0.5 s majority vote, and a tracklet is split on a stable label flip).
-- **Pose-guided regions** (shorts = hips to 40% of the way to the knees, torso, shins = knees to ankles, skin reference from the cheeks). RTMW runs **once per kept box** (never on filtered boxes), is cached, and is reused by 1.4. `--from-cache` re-runs identity without the GPU.
-- **Ref:** mainly clothed shins (vs the person's own face skin) plus a learned ref profile. "Torso isn't skin" only counts for men (women fighters wear tops). Fallback: with exactly 3 people, the third is the ref.
-- **Merged clinch box:** labelled `merged` (red+blue), not split.
-- **Profiles:** seeded from the shorts color names, then refined on the first ~60 s of the fight. report.md warns if they drift far from the seed or look swapped.
-- **`id-golden` command:** renders to `outputs/renders/1.3/`, nothing drawn on the ref unless `--show-ref` is passed. The report carries a per-clip ref check (golden 4/6 called out) and a table of Ari's 1.2 issues #2 to #8.
-- **For 1.4:** record det + pose fps and how long one 15-min fight takes.
+### 2026-11-20 · Section 1.3 · Identity: ref filter and red/blue
+**Built:**
+- **Shorts colors** (step 1, confirmed by Ari):
+  - `deepfoul shorts-check` writes contact sheets from 3 min before `action_start_s` to 1 min after, and `--save fight_id=mm:ss` saves the chosen frame to `outputs/shorts_check/<fight_id>.jpg`. It also writes `outputs/shorts_check/report.md`.
+  - `red_shorts` / `blue_shorts` are filled for all 15 fights, mostly from the broadcast trunk-color graphic. Format: main color first, accents after `+`, validated against `identity.colors`.
+- **`perception/pose.py`** (`PoseEstimator`): rtmlib RTMPose with the RTMW model `Wholebody` uses for the profile's mode. All of a frame's kept boxes go into **one ONNX call**, because the model's batch dimension is dynamic. Keypoints are identical to rtmlib's per-box loop (max diff 0.0 px), and it's 46 ms vs 70 ms per frame.
+- **`track_stream(..., pose=...)`:** RTMW runs in the same in-order pass as detection and tracking, **only on kept boxes** (guard frames included). Filtered boxes never get pose.
+- **`perception/appearance.py`:** pose-guided regions drawn as strokes scaled by torso length:
+  - shorts = hips to 35% of the way to the knees
+  - torso quad
+  - lower thigh
+  - shins
+  - upper cheeks, as the skin reference
+  - HSV histograms are 18 hue x 4 saturation chromatic bins plus 8 value bins for dark and grey pixels. A region with under 40 visible pixels is unknown, never guessed.
+  - **clothed** score = mean of "shins aren't the person's own face skin" and "shins look like the fabric at the hips".
+- **`perception/identity.py`:**
+  - **Fight profile:** seeded from the color names, then learned on the first 60 s of the fight window, every 0.5 s, in two rounds. A frame teaches the profile only when, among the big boxes (≥ 0.45x the tallest), one clearly matches red, one clearly matches blue, the two don't overlap and neither has clothed shins. It learns red/blue shorts, red/blue torso (bare skin or a top) and ref clothing.
+  - **Drift / swap warnings** go to the report.
+  - **Per-frame assignment:** each of {red, blue, ref} takes one box or stays empty, solved exhaustively (at most 7^3 combos). Unassigned boxes cost a flat 0.7.
+  - **Fighter cost:** shorts and torso similarity, each weighted by how well that cue separates the two fighters (tops in women's fights, shorts in men's). Penalties for clothed shins, and for a torso that looks like the ref's shirt more than this fighter's torso.
+  - **Ref cost:** clothed shins plus the ref clothing profile. **Third-person fallback:** with exactly 3 people and both fighters found, the third is the ref.
+  - **Smoothing:** majority vote within a ByteTrack tracklet over ±0.5 s, and a tracklet is split when a new label holds for 8 frames (an ID swap). After that, labels are de-duplicated per frame.
+  - **`apply_merges`** (past frames only) marks a box `merged` when the other fighter's box disappeared, or became a fragment inside it, and the other fighter's last box (≤ 0.5 s ago, same shot) overlapped it. In a merged frame no other box can be red or blue.
+  - **Size gate:** red/blue boxes shorter than 0.35x the tallest box in the frame become `none`.
+  - `check_lookahead` refuses settings that need more future than `lookahead_s`.
+- **`perception/id_clip.py`** has four passes:
+  - GPU: detect, track and pose, cached to `data/cache/identity/<clip>_{tracks.parquet,pose.npz,timing.json}`.
+  - CPU: re-decode and compute descriptors.
+  - Identity, which uses no pixels.
+  - Render: red/blue boxes `RED Holland`, purple `RED+BLUE`, thin grey `none`, and nothing on the ref. With `--show-ref` the ref gets a thin yellow box labelled `ref`.
+- **`deepfoul id-golden [--only] [--from-cache] [--no-render] [--show-ref] [--rebuild-profiles] [--no-checks]`:**
+  - writes renders to `outputs/renders/1.3/` (`show_ref/` for the ref versions), profiles to `data/cache/identity/<fight>_profile.npz`, and `outputs/renders/1.3/report.md` (`viz/id_report.py`).
+  - the report has per-clip and per-shot stats (both found, corner-label jumps, ref frames, possible missed ref, merged), Ari's 1.2 issues #2 to #8 with what happens now at each time (`identity_issue_checks` in the config), profile teaching counts and warnings, and speed.
+- **Tests:** 17 new identity tests, 2 new fights tests (83 total). They cover histograms (black vs navy, the low-saturation path), seed coverage, clothed shins, a fighter in black shorts vs a ref in black pants, a dressed ref in close-up, assignment with `none`, the third-person fallback, profile learning and its warnings, drift and swap warnings, the tracklet split vs a one-frame blip, the lookahead check, de-duplication and three merge cases (closing into one box, walking away, a fragment inside).
 
-**Ari's 1.2 tracking issues** (original-video time):
-- **#2** golden_01 08:12: the ref walks in front of Battle, takes his ID, and Battle gets a new one.
-- **#3** golden_02 04:58: Holland and the ref swap IDs at a cut.
-- **#4** golden_03 08:53: Vera and O'Malley swap mid-shot, then swap back at 09:09.
-- **#5** golden_04 14:03: after the angle change the clinch is one merged box.
-- **#6** golden_04 from 14:03: crowd through the fence gets IDs, Barber and Grasso merge and swap, and the ref swaps with Grasso while walking in front of the camera.
-- **#7** golden_05 11:12: the ref gets a new ID after walking behind Shara.
-- **#8** golden_06 08:41: the fighters and the ref cycle IDs after an angle change, and they're fixed again at the 08:48 angle change.
+**Decisions:**
+- **No IDs are carried across frames.** Labels come from fight-wide profiles, so cuts and ref re-entries (issues #3, #7, #8) need no special handling.
+- **Profiles are learned from the start of the fight only**, so the method stays live-compatible. The color names are the seed, and they're also what the drift/swap check compares against.
+- **Black seed range:** it originally overlapped every hue at low brightness, so "black" matched red. It now covers only pixels below `v_min`, or dark low-saturation ones. White starts at V 150, because white shorts read grey in shadow (Loosa).
+- **Clothed shins:** the first version compared shins to the lower thigh, which is also true for a bare-legged fighter. It now compares them to the shorts region (one fabric from hip to ankle means pants).
+- **Merge detection by time, not color:** backprojecting the missing fighter's colors didn't separate real clinches from a fighter alone, because dark background matches black shorts. The time-based rule only looks at the past.
+- **Adaptive cue weights:** in Barber-Grasso the tops (black vs white) separate the fighters better than the shorts, and fixed weights caused swaps in close-ups with the shorts cut off.
+- **Ref torso penalty:** in men's fights both torsos are bare skin, so the torso weight is small, and a ref in close-up with his legs out of frame took Battle's label. The penalty fixed that.
+- **The ref is never drawn** in the main renders. `--show-ref` exists so Ari can tell a hidden ref from a missed one.
 
-**Built so far (step 1):**
-- `deepfoul shorts-check [ids] [--before 180 --after 60 --step 5]` writes contact sheets to `outputs/shorts_check/sheets/`. `--save fight_id=mm:ss` saves the chosen frame to `outputs/shorts_check/<fight_id>.jpg`. Both write `outputs/shorts_check/report.md`.
-- `identity.colors` (named shorts colors as HSV ranges) and `identity.similar_pairs` in the config. `validate_fights(rows, colors)` checks the shorts names. Format: main color first, accents after `+`.
-- `red_shorts` / `blue_shorts` filled for all 15 fights, mostly from the broadcast trunk-color graphic. Barber-Grasso (2021) has no graphic, so I read it from the fighters (glove trim gives the corner). In two fights the shorts color is the opposite of the corner color: Garbrandt-Long (red corner wears blue) and Holland-Malott (red corner wears black, blue corner wears red).
-- **No truly similar-shorts fight.** The only flag is Barber-Grasso (light gray vs black), which is the stand-in for Done-when #2. It's also the women's fight, and the tops are reversed (Barber: black top + gray shorts, Grasso: white top + black shorts), so it tests that shorts are read from the right region. "Find a similar-shorts fight" is now a data-round task in ROADMAP.
+**Verified:**
+- `deepfoul id-golden --rebuild-profiles`: a full GPU run on 6 golden clips and 3 checks, then the `--show-ref` renders from cache. Detector and pose both on `CUDAExecutionProvider`, pose batched.
 
-**Next:** Ari checks `outputs/shorts_check/` and replies `colors ok` or sends corrections. Then steps 2 to 6 of the plan (pose, appearance, profiles and assignment, renders and report, tests).
+  | clip | both fighters | both or merged | corner jumps | notes |
+  |---|---|---|---|---|
+  | golden_01 Battle-Loosa | 68% | 71% | 4 | Correct through the ref crossing (#2). The ref close-up at 08:16 to 08:19 gets no fighter box; Battle at the frame edge is RED. Shot 38 is mostly a close-up with one fighter out of frame. |
+  | golden_02 Holland-Malott | 82% | 84% | 0 | Correct at the 04:58 cut (#3). Black-shorts Holland is RED, the ref in black pants is not. |
+  | golden_03 O'Malley-Vera | 87% | 98% | 1 | No swap at 08:53 or 09:09 (#4). `merged` only where both fighters share one box. |
+  | golden_04 Barber-Grasso clinch | 24% | 89% | 10 | **Not fully correct, see Known issues.** |
+  | golden_05 Magomedov-Petrosyan | 91% | 96% | 0 | Correct when the ref walks behind Shara (#7). |
+  | golden_06 Barber-Grasso stand-up | 88% | 96% | 3 | Correct through the 08:41 and 08:48 angle changes (#8). All 12 sampled frames correct. |
+  | check_01 Munhoz-O'Malley | 90% | 98% | 0 | Clean. |
+  | check_02/03 Jandiroba-Dern (ground) | 60% / 66% | 98% / 94% | 3 / 11 | Tangled pairs are `merged`, separated fighters are correct. |
+
+  Checked by eye on contact sheets of every render, at each of Ari's issue times plus 8 to 12 frames per clip.
+- **Ref hidden in the women's fight:** golden_04 has the ref in 553/600 frames (3 possible misses), golden_06 410/600 (0). In the `--show-ref` renders the yellow box follows the ref, and the main renders draw nothing on him.
+- **Profiles:** 22 to 77 teaching frames per fight, no drift or swap warnings.
+- **Speed (RTX 2080, 7199 frames):**
+  - detection 22.3 fps, pose 22.8 fps (2.8 kept boxes per frame)
+  - **whole GPU pass incl. decode and tracking: 10.5 fps**
+  - The CPU identity pass (re-decode + descriptors) adds roughly another minute per 20 s clip; it isn't optimized yet.
+  - **For 1.4:** a 15-min fight at 30 fps (27,000 frames) needs about **43 min** for detect + track + pose, and ~86 min at 60 fps (Garbrandt-Long). The 9 train fights' windows add up to about 3.7 h of video, so roughly **6 to 7 h on the GPU**, plus the identity pass.
+- `uv run pytest`: 83 passed. `git status`: nothing under `data/` or `outputs/`.
+
+**Golden set:** tracking itself is unchanged from 1.2 (same detector, filters and ByteTrack). Identity is new; golden_04 is the one clip that doesn't fully pass.
+
+**Known issues:**
+- **golden_04 clinch (Barber-Grasso, 13:56 to 14:16) is not fully correct.** Pose on a box holding two people sees one of them. At times the detector gives a wide box for the pair plus a small box on one fighter: the wide box is labelled BLUE instead of `merged` and the fragment RED (13:58.6, 14:03.8, 14:12.1). Seated cageside officials sometimes get RED (13:58.6, 14:15.5), because their grey/dark clothes look like Barber's grey shorts and their size is close to a crouched fighter's.
+- **Merged clinch frames are a blind spot** for clinch low blows (knees): there is no per-fighter pose there. Candidate for 4.1 "ID handling in clinches".
+- Crowd members behind the fence can still get a corner label for a few frames in ground shots (Jandiroba-Dern), when the fighters are tangled and the slot is free.
+- **"both fighters" is low by design** in close-ups with one fighter out of frame (golden_01 shot 38) and in clinches (`merged` instead).
+- Still no truly similar-shorts fight: Barber-Grasso (grey vs black) is the stand-in, and it passes in stand-up (golden_06). "Find a similar-shorts fight" is a data-round task in ROADMAP.
+- The identity CPU pass re-decodes the video. 1.4's single extract pass should compute descriptors from the frame already in memory.
+
+**Next:**
+- Ari: watch `outputs/renders/1.3/` (and `show_ref/` to tell a hidden ref from a missed one) and note corner flips or ref boxes as `clip timestamp what happened`. Decide whether the golden_04 clinch errors go to 4.1 or need more work before 1.4.
+- Then section 1.4 (pose extraction and caching).
 
 ### 2026-11-19 · Section 1.2 · Detection and tracking
 **Built:**

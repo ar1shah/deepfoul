@@ -1,36 +1,37 @@
 # DeepFoul Roadmap
 
-## ▶ Now: 1.3 Identity: ref filter and red/blue
+## ▶ Now: 1.4 Pose extraction and caching
 
-**Before the kickoff (you, left over from 1.2)**
-1. Watch every render in `outputs/renders/1.2/` (`report.md` links them and has per-shot track counts). Colored box = tracked (`<shot>-<id> <score>`), white = not confirmed yet, grey = dropped by a filter (rule name shown), `CUT` = guard frame at a camera cut.
-2. Write each problem as `clip timestamp what happened` (e.g. `golden 4, 14:05, fighters merged into one box in clinch`). Known already, no need to list: clinch merges in golden 4, a new ref ID every time he leaves the frame.
+**Before the kickoff (you, left over from 1.3)**
+1. Watch every render in `outputs/renders/1.3/` (`report.md` links them, with per-shot stats and your 1.2 issues re-checked). Red/blue boxes = corners, purple `RED+BLUE` = both fighters in one box (clinch), thin grey = unlabelled. Nothing is drawn on the ref; the same clips in `show_ref/` add a thin yellow `ref` box so you can tell "hidden" from "missed".
+2. Write each problem as `clip timestamp what happened`. Known already, no need to list: golden_04 clinch (wide pair box labelled blue plus a fragment, seated officials labelled red at 13:58 and 14:15), crowd getting a corner label for a few frames on the ground (Jandiroba-Dern checks).
+3. Decide: golden_04's clinch errors go to 4.1 ("ID handling in clinches"), or a short fix session before 1.4.
 
 **Kickoff prompt**
 ```
-Read CLAUDE.md, ROADMAP.md and PROGRESS.md. Plan section 1.3 only. Wait for my approval before writing code.
-Tracking issues from 1.2: <list or "none beyond the known ones">.
+Read CLAUDE.md, ROADMAP.md and PROGRESS.md. Plan section 1.4 only. Wait for my approval before writing code.
+Identity issues from 1.3: <list or "none beyond the known ones">. golden_04 clinch: <4.1 | fix first>.
 ```
 
 **Claude Code does**
-1. **Shorts colors first:** for each fight in `fights.csv`, save one frame where both fighters and the broadcast name graphic are visible to `outputs/shorts_check/<fight_id>.jpg`. Read off the shorts colors and which fighter is in which corner, fill `red_shorts` / `blue_shorts`, and flag fights where the two colors are similar. (Holland-Malott: red corner wears black, blue corner wears red.)
-2. **Pause point:** stop and ask Ari to verify the colors.
-3. Per-fight color profiles: sample torso and leg regions from early frames, build HSV histograms per person.
-4. Ref detection: the person with a shirt + long pants profile, plus a fallback ("the third person who never fights"). Tune it on the 1.2 track files (`data/cache/golden/*_tracks.parquet` keep every detection, including dropped ones with `drop_reason`), and handle seated cageside officials that get tracked in ground shots.
-5. Corner assignment from the shorts colors. Carry identity across shot cuts and ref re-entries by matching profiles. Handle the clinch case where the two fighters come out as one merged box.
-6. Re-render the golden clips with red/blue boxes and no box on the ref, in `outputs/renders/1.3/`. Keep the 3 check spans in the report.
+1. RTMW already runs once per kept box inside the tracking pass (1.3, `track_stream(..., pose=...)`, batched). 1.4 adds no second pose pass: `deepfoul extract <fight_id>` runs shots + detect/track/pose + identity in one in-order pass over the fight window and writes `data/keypoints/<fight_id>.parquet`: per frame and kept box, corner label (`red | blue | ref | merged | none`), box, 133 keypoints, confidences, shot id.
+2. Compute identity descriptors from the frame already in memory (1.3's golden tool re-decodes the video for them), and build the fight profile at the start of the same run. Resumable if interrupted (e.g. per-shot chunks).
+3. `deepfoul extract --all`: every downloaded fight that isn't extracted yet, writing `outputs/extract_report.md` (fight, status, time taken, frames, % frames with both fighters found or merged, profile warnings).
+4. Test it on one full 3-round fight.
+5. Tell Ari how long the full batch should take on the 2080 (1.3 measured 10.5 fps for detect + track + pose: ~43 min per 15-min fight at 30 fps, ~6 to 7 h for the 9 train fights, plus identity).
 
 **Done when**
-- Golden clips render with correct red/blue labels, nothing on the ref, and identities survive the cuts in those clips.
-- It works on the similar-shorts fight.
+- One full fight extracts end to end, and the report format works.
 
-**You do (at the pause point)**
-1. Open each image in `outputs/shorts_check/` and compare it to what Claude Code wrote. A wrong corner flips every label for that fight.
-2. Reply with `colors ok`, or with corrections like `ufc276_omalley_munhoz: red = purple, blue = black`.
-
-**You do (after the session)**
-1. Watch the `outputs/renders/1.3/` renders. Note any corner flips or ref boxes.
-2. Paste the issues into the 1.4 kickoff prompt.
+**You do**
+1. Before bed, open a terminal and run:
+   ```
+   cd C:\Users\AriSh\Documents\projects\deepfoul
+   uv run deepfoul extract --all
+   ```
+   Leave the PC on. If it stops, run the same command again and it picks up where it left off.
+2. In the morning, open `outputs/extract_report.md`. Note any failed fights, or any fight where both fighters were found in under ~70% of frames.
+3. Paste those notes into the 1.5 kickoff prompt.
 
 ---
 
@@ -100,31 +101,7 @@ Variety: at least 2 women's fights, at least 1 fight with similar or dark shorts
 
 ## Phase 1: Perception pipeline (the "eyes")
 
-1.3 is in progress (see **Now** at the top).
-
-### 1.4 Pose extraction and caching
-
-**Kickoff prompt**: standard, plus your identity issues from 1.3.
-
-**Claude Code does**
-1. RTMW whole-body on each fighter's tracked box. Save per frame: corner, box, 133 keypoints, confidences.
-2. `deepfoul extract <fight_id>` runs shots + tracking + identity + pose and writes `data/keypoints/<fight_id>.parquet`. Resumable if interrupted.
-3. `deepfoul extract --all`: every downloaded fight that isn't extracted yet, writing `outputs/extract_report.md` (fight, status, time taken, frames, % frames with both fighters found).
-4. Test it on one full 3-round fight.
-5. Tell Ari how long the full batch should take on the 2080.
-
-**Done when**
-- One full fight extracts end to end, and the report format works.
-
-**You do**
-1. Before bed, open a terminal and run:
-   ```
-   cd C:\Users\AriSh\Documents\projects\deepfoul
-   uv run deepfoul extract --all
-   ```
-   Leave the PC on. If it stops, run the same command again and it picks up where it left off.
-2. In the morning, open `outputs/extract_report.md`. Note any failed fights, or any fight where both fighters were found in under ~70% of frames.
-3. Paste those notes into the 1.5 kickoff prompt.
+1.4 is in progress (see **Now** at the top).
 
 ### 1.5 Overlay renderer v1 + benchmark
 
@@ -480,6 +457,9 @@ Frame reader (`iter_frames`, frame-exact vs ffmpeg on the 50 and 60 fps videos),
 
 ### 1.2 Detection and tracking ✅
 Golden set in `labels/golden.csv` (golden 5 shifted to 11:10-11:30 to stay in the fight window). rtmlib YOLOX with scores kept + ByteTrack from Roboflow `trackers` (supervision dropped it), reset at every cut with ±1-frame guard frames, loose crowd filters plus a relative-height rule. `deepfoul track-golden` writes renders, per-detection parquet and a report. Stand-up is stable; clinch merges, ground shots and ref re-entry IDs go to 1.3. Detection ~20 fps on the 2080.
+
+### 1.3 Identity: ref filter and red/blue ✅
+Shorts colors for all 15 fights (`shorts-check`), RTMW pose once per kept box in the tracking pass (batched), and red/blue/ref/merged labels from fight-wide appearance profiles (shorts + torso, clothed shins for the ref), smoothed within tracklets. `deepfoul id-golden` renders + report. Cuts, ref crossings and re-entries are solved; the golden_04 clinch is only partly right, and Barber-Grasso (grey vs black) stands in for a similar-shorts fight.
 
 ---
 
