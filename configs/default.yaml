@@ -49,3 +49,31 @@ shots:
 
 previews:
   golden_pad_s: 10          # golden candidate clips: live time +- this many seconds
+
+# Person detection, 1.2. rtmlib YOLOX of the profile's pose_mode (NMS is inside the model).
+det:
+  score_min: 0.1            # keep low-score boxes: ByteTrack's second pass uses them
+
+# Tracking, 1.2. ByteTrack within each shot; reset at every cut.
+tracking:
+  cut_guard_frames: 1       # frames cut-1 and cut are not fed to the tracker (blended frames)
+  bytetrack:                # trackers.ByteTrackTracker args (frame_rate comes from the video)
+    lost_track_buffer: 30   # in 30 fps frames
+    track_activation_threshold: 0.5
+    minimum_consecutive_frames: 2
+    minimum_iou_threshold: 0.1
+    high_conf_det_threshold: 0.5
+  # Loose on purpose: picking fighters and the ref is 1.3's job.
+  filters:
+    min_height_frac: 0.10       # box shorter than this fraction of the frame -> small
+    rel_min_height_frac: 0.4    # shorter than this x the tallest confident box -> rel_small
+    ref_score_min: 0.5          # boxes that count as "confident" for rel_small
+    min_bottom_frac: 0.35       # box bottom above this fraction of the frame -> high (crowd)
+    border_margin_frac: 0.01    # touching the left/right edge ...
+    edge_max_height_frac: 0.25  # ... and shorter than this -> edge (partial crew)
+    max_people: 6               # keep at most this many tallest boxes
+  # Extra 30 s checks on non-golden train fights; thresholds must hold here too (no renders).
+  checks:
+    - {check_id: check_01, fight_id: ufc276_munhoz_omalley, start_s: 250, end_s: 280}
+    - {check_id: check_02, fight_id: ufc321_jandiroba_dern, start_s: 150, end_s: 180}
+    - {check_id: check_03, fight_id: ufc321_jandiroba_dern, start_s: 520, end_s: 550}
