@@ -170,6 +170,7 @@ dependencies = [
     { name = "rtmlib" },
     { name = "scenedetect" },
     { name = "supervision" },
+    { name = "trackers" },
     { name = "typer" },
 ]
 
@@ -189,6 +190,7 @@ requires-dist = [
     { name = "rtmlib" },
     { name = "scenedetect" },
     { name = "supervision" },
+    { name = "trackers", specifier = ">=2.7.0" },
     { name = "typer" },
 ]
 
@@ -246,6 +248,18 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/01/e1/2069291243c926a2ff1cd706c7f3eeb9b62144bf60f77c9fb9ff2fb26bd3/iniconfig-2.3.1.tar.gz", hash = "sha256:67f4b9c50da0dedf52af349e7749a80a9057a5031199791b906c3bb3ae878960", size = 21209, upload-time = "2026-10-06T22:48:38.076Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/56/43/4ca9e49d27a1fcf6bece6f6aec0ea46bb9112489b93d4b688fb415457bdb/iniconfig-2.3.1-py3-none-any.whl", hash = "sha256:9121e2c1fdb355232495be3194c8dfe87ccc2d5dee45947b78e68f499790d7a7", size = 7552, upload-time = "2026-10-06T22:48:36.959Z" },
+]
+
+[[package]]
+name = "jsonargparse"
+version = "4.53.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyyaml" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/6e/78/c98e5733f7503ea7b44737408798eabf7b4009c43c496a2b51eb9c084aca/jsonargparse-4.53.0.tar.gz", hash = "sha256:1777126997427bf3fa4b8da02eeded5250a1544d7b16496f82069e2bcaf9d17f", size = 167354, upload-time = "2026-10-23T08:45:14.653Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a8/2f/77a50c590181e0da3fc857622a163c7d66f5f43d9dba0e8d609c97b86f1c/jsonargparse-4.53.0-py3-none-any.whl", hash = "sha256:3e78dfd4e02ef00c899e85a9b0593347d730c7d551411568438a294cf1d39959", size = 177603, upload-time = "2026-10-23T08:45:11.244Z" },
 ]
 
 [[package]]
@@ -861,6 +875,24 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/0d/ea/b2a5bd54b28a324dae8211928b2d730b6547500342c7e6c6dea08bd0a485/tqdm-4.70.1.tar.gz", hash = "sha256:cefd0eca11b2a37a3aee776544d4f4ae913f02688135b5556b8788dfa474afc4", size = 171846, upload-time = "2026-09-11T07:25:16.601Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a7/03/921a3d3c75785aca9ebfbfcabfbc3a1be12e2ab5265deb026d55a5a3f83e/tqdm-4.70.1-py3-none-any.whl", hash = "sha256:c293e525e6fef9c20e8728fd4612df02a0aa31bb5fe91ecd93e123b1b7bffa73", size = 80199, upload-time = "2026-09-11T07:25:14.599Z" },
+]
+
+[[package]]
+name = "trackers"
+version = "2.7.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "jsonargparse" },
+    { name = "numpy" },
+    { name = "pydeprecate" },
+    { name = "requests" },
+    { name = "rich" },
+    { name = "scipy" },
+    { name = "supervision" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/cf/0d/398b53f0c319347df72d1079927ef2405ecbd0f5c905311dc4b96241ee5c/trackers-2.7.0.tar.gz", hash = "sha256:938cc2b924bf9afd0650027017e8df443d8db1602a01c5d62b2eef108b78f749", size = 273537, upload-time = "2026-11-05T14:47:09.408Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f0/16/e9f815389516a4e0e9264fc0998a7c7cac7994571f4045a9bad22fdd917b/trackers-2.7.0-py3-none-any.whl", hash = "sha256:127a60c00682c91e3d8ac37b433138c07fe7c4c605c8ee703e48a55a4404b237", size = 324865, upload-time = "2026-11-05T14:47:07.702Z" },
 ]
 
 [[package]]

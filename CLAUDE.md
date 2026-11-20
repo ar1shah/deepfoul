@@ -41,7 +41,7 @@ It flags clips for a replay official. It never makes the call itself (think VAR,
 |---|---|---|
 | Whole-body pose (133 keypoints) | RTMW via `rtmlib` (ONNX) | Apache 2.0 |
 | Person detection | YOLOX detector bundled with `rtmlib` | Apache 2.0 |
-| Tracking | ByteTrack (via `supervision`) | MIT |
+| Tracking | ByteTrack via Roboflow `trackers` (`ByteTrackTracker`; supervision dropped its own in 0.26+) | Apache 2.0 |
 | Drawing overlays | `supervision` + OpenCV | MIT / Apache 2.0 |
 | Shot / camera-cut detection | PySceneDetect | BSD-3 |
 | Classifier | LightGBM baseline, then a small PyTorch temporal model | MIT / BSD |

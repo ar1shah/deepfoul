@@ -18,6 +18,7 @@ dependencies = [
     # GPU inference on the Windows PCs (CUDA + cuDNN come from pip wheels), CPU on the Mac.
     "onnxruntime-gpu[cuda,cudnn]; sys_platform != 'darwin'",
     "onnxruntime; sys_platform == 'darwin'",
+    "trackers>=2.7.0",
 ]
 
 [project.scripts]
