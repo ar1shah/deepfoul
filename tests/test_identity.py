@@ -241,3 +241,29 @@ def test_merge_with_a_fragment_inside_the_wide_box():
     df = merge_df([(0, "red", left), (0, "blue", right), (1, "red", wide), (1, "blue", frag)])
     out = apply_merges(df, 30.0, CFG["assign"])
     assert out["label"].tolist() == ["red", "blue", "merged", "none"]
+
+
+@pytest.mark.xfail(strict=True, reason="4.1 ID handling in clinches: merges are sticky; a width gate was tried in 1.5 and broke real clinches")
+def test_no_sticky_merge_on_a_lone_fighter():
+    """1.5: after a real merge, the other fighter leaves and one fighter fills a long close-up.
+    The lone box is about one person wide, so it goes back to its own corner."""
+    from deepfoul.perception.identity import apply_merges
+
+    left, right, wide = (0, 100, 150, 400), (120, 100, 280, 400), (0, 100, 280, 400)
+    lone = (20, 100, 180, 400)
+    df = merge_df([(0, "red", left), (0, "blue", right), (1, "red", wide)]
+                  + [(f, "red", lone) for f in range(2, 60)])
+    out = apply_merges(df, 30.0, CFG["assign"])["label"].tolist()
+    assert out[:3] == ["red", "blue", "merged"]
+    assert set(out[3:]) == {"red"}
+
+
+@pytest.mark.xfail(strict=True, reason="4.1 ID handling in clinches: the fragment rule swallows a fighter standing behind the other")
+def test_fighter_standing_behind_is_not_swallowed():
+    """1.5: one fighter partly hidden behind the other (box mostly inside the front one) stays a
+    fighter when the front box is only about one person wide."""
+    from deepfoul.perception.identity import apply_merges
+
+    front, behind = (830, 0, 1390, 1060), (720, 30, 1125, 760)
+    df = merge_df([(0, "blue", front), (0, "red", behind), (1, "blue", front), (1, "red", behind)])
+    assert apply_merges(df, 30.0, CFG["assign"])["label"].tolist() == ["blue", "red", "blue", "red"]

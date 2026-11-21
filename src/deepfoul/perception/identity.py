@@ -410,6 +410,16 @@ def apply_merges(df, fps: float, ac: dict):
     merge_memory_s ago in the same shot, overlapped this one. A fighter who just walked out of
     frame never overlapped the remaining one, so a lone fighter stays red or blue. While the
     pair stays merged, the merged box stands in as both fighters' last box.
+
+    Intended behavior (target for 4.1, two strict-xfail tests in test_identity.py): when one
+    fighter fully hides the other, the visible one keeps their own corner and the hidden one is
+    just missing, with no merged box. Known limits (1.5 contact sheets):
+    - The merge is sticky. In a long one-fighter close-up (a doctor check during a foul
+      timeout), the merged box keeps standing in for the missing fighter, so a lone fighter
+      stays 'merged' for the whole shot.
+    - A fighter standing behind the other can be swallowed as a "fragment".
+    A width gate was tried in 1.5 and dropped: real clinch boxes are no wider than one
+    fighter's open stance. The per-box 'raw_label' in the cache still holds the corner.
     """
     mem = ac["merge_memory_s"] * fps
     last: dict[str, tuple] = {}
