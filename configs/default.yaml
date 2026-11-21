@@ -157,6 +157,19 @@ extract:
   target_fps: 30            # take every round(fps / target_fps)-th frame (60 and 50 fps -> 2)
   chunk_s: 60               # resume unit: whole shots grouped into parts of about this long
   describe_workers: 3       # CPU threads for color descriptors, overlapping the GPU (0 = in-line)
+  # extract_report flags (1.5, set from the 13-fight spread: b/m of visible 78-96%, median 90;
+  # visible 83-100%). Under bom_of_visible_min = tracking worth a look; under visible_min = lots
+  # of frames with no fighter (breaks, crowd, close-ups, long stoppages).
+  check:
+    bom_of_visible_min: 82
+    visible_min: 88
+
+# `deepfoul bench` (1.5): timed span after an untimed warm-up. Barber-Grasso is the 1.4 baseline.
+bench:
+  fight_id: ufc258_barber_grasso
+  start_s: 500
+  seconds: 60
+  warmup_s: 3
 
 pose:
   batch: true                 # one ONNX call per frame when the model allows it

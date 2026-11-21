@@ -324,7 +324,7 @@ def extract(
     def write_report():
         write_extract_report([{k: v for k, v in r.items() if k not in ("row", "job")}
                               for r in results], report, gpu_s,
-                             time.perf_counter() - run_t0, 70.0)
+                             time.perf_counter() - run_t0, cfg["extract"]["check"])
 
     def fill_from_file(r, job):
         meta = read_meta(job.paths["boxes"])
@@ -424,6 +424,187 @@ def extract(
             r["frames_est"] = 0
             write_report()
     typer.echo(f"report -> {report}")
+
+
+@app.command()
+def render(
+    fight_id: str = typer.Argument(None, help="fight_id from fights.csv (not needed with --golden)."),
+    start: str = typer.Option(None, "--start", help="mm:ss(.cc) or seconds; default window start."),
+    end: str = typer.Option(None, "--end", help="mm:ss(.cc) or seconds; default window end."),
+    skeleton: bool = typer.Option(False, "--skeleton", help="Draw the 133-point skeletons."),
+    highlight: str = typer.Option("both", "--highlight",
+                                  help="Big dots with --skeleton: poke (fingertips + eyes), "
+                                  "low_blow (hips, knees, ankles, feet), both, none."),
+    speed: float = typer.Option(1.0, "--speed", help="Playback speed, e.g. 0.25 (no audio)."),
+    show_ref: bool = typer.Option(False, "--show-ref", help="Thin yellow box on the ref."),
+    show_none: bool = typer.Option(True, "--show-none/--hide-none",
+                                   help="Thin grey boxes on unlabelled people."),
+    out: Path = typer.Option(None, "--out", help="Output .mp4 (default outputs/renders/)."),
+    sheet: str = typer.Option(None, "--sheet", help="Contact sheet instead of a video: merged | "
+                              "single (exactly one fighter), to outputs/extract_check/."),
+    n: int = typer.Option(24, "--n", help="Frames on a --sheet."),
+    seed: int = typer.Option(0, "--seed", help="Random seed for --sheet."),
+    golden: bool = typer.Option(False, "--golden", help="Render every golden clip with "
+                                "skeletons (plus 0.25x for the foul clips)."),
+    only: list[str] = typer.Option(None, "--only", help="With --golden: only these event_ids."),
+    tag: str = typer.Option("1.5", "--tag", help="With --golden: outputs/renders/<tag>/."),
+) -> None:
+    """Draw red / blue / merged boxes (and skeletons) from the keypoint cache. No GPU."""
+    from deepfoul.io.fetch import read_fights
+    from deepfoul.io.fights import parse_time, window
+    from deepfoul.io.previews import fmt_ts
+    from deepfoul.io.shots import first_frame_at
+    from deepfoul.perception.extract import keypoints_paths, read_meta
+    from deepfoul.viz.overlay import HIGHLIGHTS, read_range, render_clip
+
+    cfg = load_config()
+    if highlight not in HIGHLIGHTS:
+        raise typer.BadParameter(f"--highlight must be one of {', '.join(HIGHLIGHTS)}")
+    if speed <= 0:
+        raise typer.BadParameter("--speed must be > 0")
+    fights = {r["fight_id"].strip(): r for r in read_fights(cfg["paths"]["labels"] / "fights.csv")}
+    if golden:
+        _render_golden(cfg, fights, only, tag)
+        return
+    if not fight_id or fight_id not in fights:
+        raise typer.BadParameter(f"unknown fight_id {fight_id!r}")
+    row = fights[fight_id]
+    paths = keypoints_paths(cfg["paths"]["keypoints"], fight_id)
+    meta = read_meta(paths["boxes"])
+    if meta is None:
+        raise typer.BadParameter(f"{fight_id}: no keypoint cache, run `deepfoul extract` first")
+    fps = meta["fps"]
+    w0, w1 = window(row)
+    s0 = parse_time(start) if start else (w0 or 0.0)
+    s1 = parse_time(end) if end else (w1 if w1 is not None else meta["window"][1])
+    f0, f1 = first_frame_at(s0, fps), first_frame_at(s1, fps)
+    frames = read_range(paths["frames"], f0, f1)
+    if sheet:
+        _render_sheet(cfg, row, paths, frames, f0, f1, fps, sheet, n, seed)
+        return
+    boxes = read_range(paths["boxes"], f0, f1, None if skeleton else
+                       ["frame_idx", "x1", "y1", "x2", "y2", "corner", "fallback"])
+    name = (f"{fight_id}_{fmt_ts(s0).replace(':', '')}-{fmt_ts(s1).replace(':', '')}"
+            + ("_skel" if skeleton else "") + (f"_x{speed:g}" if speed != 1 else "") + ".mp4")
+    out = out or (cfg["paths"]["outputs"] / "renders" / name)
+    wrote = render_clip(row, s0, s1, frames, boxes, cfg["paths"]["raw"], out, skeleton=skeleton,
+                        show_ref=show_ref, show_none=show_none, kpt_thr=cfg["kpt_conf_min"],
+                        highlight=HIGHLIGHTS[highlight], speed=speed)
+    typer.echo(f"{wrote} frames -> {out}")
+
+
+def _render_sheet(cfg, row, paths, frames, f0, f1, fps, kind, n, seed):
+    import numpy as np
+
+    from deepfoul.viz.overlay import read_range, sheet_frames, write_sheet
+
+    fid = row["fight_id"].strip()
+    boxes = read_range(paths["boxes"], f0, f1, ["frame_idx", "x1", "y1", "x2", "y2", "corner",
+                                                "fallback"])
+    pool = sheet_frames(boxes, frames, kind)
+    if not len(pool):
+        typer.echo(f"{fid}: no {kind} frames in range")
+        return
+    picks = sorted(np.random.default_rng(seed).choice(pool, min(n, len(pool)), replace=False))
+    out = cfg["paths"]["outputs"] / "extract_check" / f"{fid}_{kind}.jpg"
+    write_sheet(row, [int(p) for p in picks], boxes, frames, cfg["paths"]["raw"], out, fps,
+                cfg["kpt_conf_min"])
+    typer.echo(f"{len(picks)} of {len(pool)} {kind} frames -> {out}")
+
+
+def _render_golden(cfg, fights, only, tag):
+    import csv
+
+    from deepfoul.io.previews import fmt_ts
+    from deepfoul.io.shots import first_frame_at
+    from deepfoul.perception.extract import keypoints_paths, read_meta, summarize
+    from deepfoul.viz.id_report import read_baseline
+    from deepfoul.viz.overlay import HIGHLIGHTS, read_range, render_clip
+
+    out_dir = cfg["paths"]["outputs"] / "renders" / tag
+    with (cfg["paths"]["labels"] / "golden.csv").open(encoding="utf-8-sig", newline="") as f:
+        golden = [g for g in csv.DictReader(f) if not only or g["event_id"] in only]
+    base = read_baseline(cfg["paths"]["labels"] / "golden_baseline.csv")
+    hl = {"eye_poke": "poke", "low_blow": "low_blow"}
+    lines = [f"# Golden renders ({tag})", "",
+             "Drawn from the full-fight keypoint caches (`data/keypoints/`), skeletons on. Points "
+             f"under {cfg['kpt_conf_min']} confidence are not drawn. Big dots: fingertips + eyes "
+             "on the poke clip, hips / knees / ankles / feet on the low blow clip, all of them "
+             "elsewhere. Foul clips also get a 0.25x version (no audio). Numbers are from the "
+             "full-fight cache, so tracklets that start before the clip can differ slightly from "
+             "the clip caches the baseline was measured on.", "",
+             "| clip | fight | span | type | both | both or merged | baseline b-or-m | renders |",
+             "|---|---|---|---|---|---|---|---|"]
+    for g in golden:
+        fid, cid = g["fight_id"], g["event_id"]
+        row = fights[fid]
+        paths = keypoints_paths(cfg["paths"]["keypoints"], fid)
+        fps = read_meta(paths["boxes"])["fps"]
+        s0, s1 = float(g["start_s"]), float(g["end_s"])
+        f0, f1 = first_frame_at(s0, fps), first_frame_at(s1, fps)
+        frames = read_range(paths["frames"], f0, f1)
+        boxes = read_range(paths["boxes"], f0, f1)
+        kind = g["foul_type"]
+        links = []
+        for sp in ([1.0, 0.25] if kind in hl else [1.0]):
+            sfx = "" if sp == 1 else f"_x{sp:g}"
+            out = out_dir / f"{cid}_{fid}_{kind}{sfx}.mp4"
+            render_clip(row, s0, s1, frames, boxes, cfg["paths"]["raw"], out, skeleton=True,
+                        kpt_thr=cfg["kpt_conf_min"], highlight=HIGHLIGHTS[hl.get(kind, "both")],
+                        speed=sp)
+            links.append(f"[{sp:g}x]({out.name})")
+            typer.echo(f"{cid} {sp:g}x -> {out}")
+        s = summarize(boxes, frames)
+        b = base.get(cid, {})
+        lines.append(f"| {cid} | {fid} | {fmt_ts(s0)}-{fmt_ts(s1)} | {kind} | "
+                     f"{s['both_pct']:.0f}% | {s['both_or_merged_pct']:.0f}% | "
+                     f"{b.get('both_or_merged_pct', '-')}% | {' '.join(links)} |")
+    (out_dir / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    typer.echo(f"index -> {out_dir / 'renders.md'}")
+
+
+@app.command()
+def bench(
+    fight: str = typer.Option(None, "--fight", help="fight_id (default: configs bench.fight_id)."),
+    start: str = typer.Option(None, "--start", help="mm:ss(.cc) or seconds (default from config)."),
+    seconds: float = typer.Option(None, "--seconds", help="Timed span length (default 60)."),
+) -> None:
+    """Speed of every stage on this machine: decode, detection, pose, descriptors, the full
+    extract pass, identity and the renderer. Writes outputs/bench/<date>_<gpu>.md + .json."""
+    from importlib.metadata import version
+
+    from deepfoul.bench import run_bench, write_bench
+    from deepfoul.io.fetch import read_fights
+    from deepfoul.io.fights import parse_time
+    from deepfoul.perception.detect import PersonDetector
+    from deepfoul.perception.pose import PoseEstimator
+
+    cfg = load_config()
+    bc = cfg["bench"]
+    fid = fight or bc["fight_id"]
+    fights = {r["fight_id"].strip(): r for r in read_fights(cfg["paths"]["labels"] / "fights.csv")}
+    if fid not in fights:
+        raise typer.BadParameter(f"unknown fight_id {fid!r}")
+    s0 = parse_time(start) if start else float(bc["start_s"])
+    secs = seconds or float(bc["seconds"])
+    gpu, vram = _gpu_info()
+    prof = pick_profile(cfg, vram)
+    mode = cfg["profiles"][prof]["pose_mode"]
+    _init_ort()
+    device = cfg["device"] if cfg["device"] != "auto" else ("cuda" if gpu else "cpu")
+    det = PersonDetector(mode, device, cfg["det"]["score_min"])
+    pose = PoseEstimator(mode, device, cfg["pose"]["batch"])
+    typer.echo(f"detector + pose ({mode}) on {det.providers[0]} / {pose.providers[0]}, "
+               f"pose batched: {pose.batched}; timing {fid} {s0:.0f}-{s0 + secs:.0f} s ...")
+    ort_name = "onnxruntime-gpu" if gpu else "onnxruntime"
+    machine = {"gpu": gpu, "vram_gb": vram, "profile": prof, "pose_mode": mode,
+               "providers": f"{det.providers[0]} / {pose.providers[0]}",
+               "rtmlib": version("rtmlib"), "onnxruntime": version(ort_name)}
+    out_dir = cfg["paths"]["outputs"] / "bench"
+    res = run_bench(cfg, fights[fid], s0, secs, det, pose, out_dir, machine, fights)
+    md = write_bench(res, out_dir)
+    typer.echo(md.read_text(encoding="utf-8"))
+    typer.echo(f"report -> {md}")
 
 
 @app.command("shots-check")
@@ -675,7 +856,7 @@ def _shorts_report(cfg: dict, out_dir: Path) -> None:
     rows = read_fights(cfg["paths"]["labels"] / "fights.csv")
     images = {p.stem for p in out_dir.glob("*.jpg")}
     write_shorts_report(rows, cfg["identity"]["similar_pairs"], images, out_dir / "report.md")
-    typer.echo(f"report -> {out_dir / 'report.md'}")
+    typer.echo(f"index -> {out_dir / 'renders.md'}")
 
 
 @app.command("id-golden")

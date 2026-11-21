@@ -19,7 +19,6 @@ from deepfoul.perception.appearance import describe
 from deepfoul.perception.extract import make_profile, read_boxes, region_cfg
 from deepfoul.perception.identity import Profile, build_profile
 
-RED, BLUE, PURPLE, GREY, REF = (40, 40, 230), (230, 120, 30), (200, 60, 200), (150, 150, 150), (0, 215, 255)
 
 
 # ---------------------------------------------------------------- profiles
@@ -77,54 +76,8 @@ def get_profile(row: dict, cfg: dict, detect, pose, raw_dir: Path, cache_dir: Pa
 def render_identity(row: dict, start_s: float, end_s: float, tracks: pd.DataFrame,
                     ident: pd.DataFrame, raw_dir: Path, out: Path, show_ref: bool = False,
                     show_none: bool = True) -> None:
-    import cv2
+    """id-golden's render: the 1.5 overlay renderer on a clip cache (labels in `label`)."""
+    from deepfoul.viz.overlay import render_clip
 
-    from deepfoul.io.previews import clip_writer, frame_label, put_label
-    from deepfoul.io.video import iter_fight_frames
-
-    names = {"red": row["red_fighter"].split()[-1], "blue": row["blue_fighter"].split()[-1]}
-    meta = tracks.groupby("frame_idx").agg(shot_id=("shot_id", "first"), guard=("guard", "first"))
-    by_frame = {f: g for f, g in ident.groupby("frame_idx")} if not ident.empty else {}
-    video = raw_dir / f"{row['fight_id'].strip()}.mp4"
-    write = None
-    with_stack = []
-    try:
-        for f in iter_fight_frames(row, raw_dir, start_s, end_s):
-            img = f.image
-            h, w = img.shape[:2]
-            scale = h / 720
-            if write is None:
-                cm = clip_writer(video, f.t, end_s, (w, h), out)
-                write = cm.__enter__()
-                with_stack.append(cm)
-            for _, r in (by_frame.get(f.idx, pd.DataFrame()).iterrows()):
-                lab = r["label"]
-                p1, p2 = (round(r.x1), round(r.y1)), (round(r.x2), round(r.y2))
-                if lab in ("red", "blue", "merged"):
-                    color = {"red": RED, "blue": BLUE, "merged": PURPLE}[lab]
-                    text = (f"{lab.upper()} {names[lab]}" if lab != "merged" else "RED+BLUE")
-                    cv2.rectangle(img, p1, p2, color, max(2, round(3 * scale)), cv2.LINE_AA)
-                    _tag(img, text, p1, color, scale)
-                elif lab == "ref" and show_ref:
-                    cv2.rectangle(img, p1, p2, REF, 1, cv2.LINE_AA)
-                    _tag(img, "ref" + (" (3rd)" if r.get("fallback") else ""), p1, REF, scale * 0.8)
-                elif lab == "none" and show_none:
-                    cv2.rectangle(img, p1, p2, GREY, 1, cv2.LINE_AA)
-            shot = meta["shot_id"].get(f.idx, None)
-            guard = bool(meta["guard"].get(f.idx, False))
-            label = f"{frame_label(f.t, f.idx)}  shot {'-' if shot is None else shot}"
-            write(put_label(img, label + ("  CUT" if guard else ""), scale))
-    finally:
-        for cm in with_stack:
-            cm.__exit__(None, None, None)
-
-
-def _tag(img, text, p1, color, scale):
-    import cv2
-
-    fs = 0.55 * scale
-    (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, fs, 1)
-    x, y = p1[0], max(int(th + 6), p1[1])
-    cv2.rectangle(img, (x, y - th - 6), (x + tw + 6, y), color, -1)
-    cv2.putText(img, text, (x + 3, y - 4), cv2.FONT_HERSHEY_SIMPLEX, fs, (255, 255, 255),
-                max(1, round(scale)), cv2.LINE_AA)
+    render_clip(row, start_s, end_s, tracks, ident, raw_dir, out, label_col="label",
+                show_ref=show_ref, show_none=show_none)

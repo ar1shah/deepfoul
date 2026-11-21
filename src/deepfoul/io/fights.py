@@ -28,6 +28,17 @@ def parse_mmss(s: str) -> int:
     return total
 
 
+def parse_time(s: str) -> float:
+    """'14:03.8' -> 843.8, '843.8' -> 843.8, '1:02:03' -> 3723.0 (seconds of the original video)."""
+    s = s.strip()
+    if ":" not in s:
+        return float(s)
+    whole, _, frac = s.partition(".")
+    if frac and not frac.isdigit():
+        raise ValueError(f"bad time {s!r}")
+    return parse_mmss(whole) + (float(f"0.{frac}") if frac else 0.0)
+
+
 def window(row: dict[str, str]) -> tuple[float | None, float | None]:
     """(action_start_s, action_end_s) as floats, None where blank."""
     def f(k: str) -> float | None:

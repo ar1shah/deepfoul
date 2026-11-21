@@ -142,19 +142,23 @@ def clip_name(fight_id: str, live_s: float, foul_type: str) -> str:
 
 
 @contextmanager
-def clip_writer(video: Path, first_t: float, end_s: float, size: tuple[int, int], out: Path):
-    """Pipe BGR frames into an H.264 mp4 at the source frame rate, muxing the raw video's audio
-    from first_t to end_s. Yields a write(img) function. The raw file is only read."""
+def clip_writer(video: Path, first_t: float, end_s: float, size: tuple[int, int], out: Path,
+                fps: str | float | None = None, audio: bool = True):
+    """Pipe BGR frames into an H.264 mp4 at the source frame rate (or `fps`), muxing the raw
+    video's audio from first_t to end_s unless audio=False (slow motion). Yields a write(img)
+    function. The raw file is only read."""
     info = video_info(video)
     w, h = size
     out.parent.mkdir(parents=True, exist_ok=True)
+    rate = (fps if isinstance(fps, str) else f"{fps:.6f}") if fps else (
+        info["r_frame_rate"] or str(info["fps"]))
     cmd = ["ffmpeg", "-y", "-v", "error",
-           "-f", "rawvideo", "-pix_fmt", "bgr24", "-s", f"{w}x{h}",
-           "-r", info["r_frame_rate"] or str(info["fps"]), "-i", "-",
-           "-ss", f"{first_t:.6f}", "-t", f"{end_s - first_t:.6f}", "-i", str(video),
-           "-map", "0:v", "-map", "1:a?",
-           "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
-           "-c:a", "aac", "-b:a", "128k", "-shortest", str(out)]
+           "-f", "rawvideo", "-pix_fmt", "bgr24", "-s", f"{w}x{h}", "-r", rate, "-i", "-"]
+    if audio:
+        cmd += ["-ss", f"{first_t:.6f}", "-t", f"{end_s - first_t:.6f}", "-i", str(video),
+                "-map", "0:v", "-map", "1:a?"]
+    cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p"]
+    cmd += (["-c:a", "aac", "-b:a", "128k", "-shortest"] if audio else []) + [str(out)]
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
     try:
         yield lambda img: proc.stdin.write(np.ascontiguousarray(img).tobytes())
