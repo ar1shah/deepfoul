@@ -10,8 +10,8 @@ Claude Code updates this file at the end of every ROADMAP section. Newest entrie
 | 1 | 1.1 Video IO and shot detection | Done (shots for 9 train fights) |
 | 1 | 1.2 Detection and tracking | Done (stand-up stable; clinch/ground to 1.3) |
 | 1 | 1.3 Identity: ref filter and red/blue | Done (stand-up and cuts correct; golden_04 clinch partly wrong, see log) |
-| 1 | 1.4 Pose extraction and caching | Done (Barber-Grasso end to end; `extract --all` is Ari's overnight run) |
-| 1 | 1.5 Overlay renderer v1 + benchmark | Not started |
+| 1 | 1.4 Pose extraction and caching | Done (all 13 non-test fights cached, 11h15m overnight) |
+| 1 | 1.5 Overlay renderer v1 + benchmark | Done (golden renders with skeletons, 10.2 fps full pass) |
 | 2 | 2.1 Labeling app | Not started |
 | 2 | 2.2 Stoppage finder | Not started |
 | 2 | 2.3 Dataset builder | Not started |
@@ -29,7 +29,20 @@ Claude Code updates this file at the end of every ROADMAP section. Newest entrie
 | 7 | 7.1 Repo polish | Not started |
 
 ## Key numbers
-- Pipeline speed (fps on RTX 2080): person detection 20-23 fps (YOLOX-m, ~45 ms/frame, about half of it the in-model NMS). Tracking + 1080p decode + debug render: 13-16 fps end to end. Detect + track + RTMW pose (batched, 2.8 boxes/frame): 10.5 fps. **Full extract pass** (decode + detect + track + RTMW + color descriptors on 3 CPU threads): **9.9 fps** on Barber-Grasso (27,602 frames in 46 min), plus ~2 min of identity per fight.
+- **Benchmark** (`deepfoul bench`, RTX 2080, Barber-Grasso 500-560 s, 1080p30, 2.54 boxes per frame, `outputs/bench/2026-11-21_rtx-2080.md`):
+
+  | stage | speed |
+  |---|---|
+  | decode only | 222 fps |
+  | detection (YOLOX-m) | 20.6 fps (48.6 ms/frame) |
+  | pose (RTMW-x, batched) | 23.0 fps (43.5 ms/frame, 17.1 ms per box) |
+  | color descriptors | 57 ms/frame of CPU, on 3 threads overlapping the GPU |
+  | **full extract pass** | **10.2 fps** |
+  | identity from rows | 313 fps |
+  | overlay render + skeletons | 50 fps |
+
+  - GPU memory: 3.1 GB of 8 GB, flat during the pass.
+  - The 13 non-test fights (405k processed frames) take **~11 h** of extract (measured: 11h15m).
 - Shot detection (CPU decode): ~190 fps at 1080p30, ~110 fps at 60 fps. All 9 train fights: ~38 min.
 - Labeled positives: eye_poke - / low_blow - / open_hand -
 - Fights: train 9 / val 4 / test 2 (8 foul, 5 clean, 2 test). Known fouls: 16 (`labels/notes/known_fouls.csv`)
@@ -38,13 +51,19 @@ Claude Code updates this file at the end of every ROADMAP section. Newest entrie
 - Test metrics: -
 
 ## Open issues
-- **Speed:** the full extract pass is 9.9 fps (GPU-bound), so ~11.5 h for the 13 non-test fights. Options for 1.5 if needed: fp16, a lower NMS candidate cap, or pose only on likely fighters.
+- **Speed:** the full extract pass is 10.2 fps (GPU-bound), ~11 h for the 13 non-test fights. That's fine as an overnight run, so no speed work was done. Options if a bigger batch needs it: fp16, a lower NMS candidate cap, or pose only on likely fighters.
 - **Clinch identity** (4.1 "ID handling in clinches"): a tied-up pair is labelled `merged` (no per-fighter pose). golden_04 is a **known failure in `labels/golden_baseline.csv`**: at 14:03.8 the detector gives a wide pair box (BLUE) plus a fragment (RED) instead of one merged box. The seated officials labelled RED in 1.3 (13:58.6, 14:15.5) are fixed by the 1.4 weak-corner guard.
+- **Sticky merges and other 1.5 identity findings** (4.1, see the 1.5 log):
+  - lone fighters stay `merged` through long stoppage close-ups
+  - the fragment rule swallows a fighter standing behind the other
+  - a fighter in black shorts seen from behind is costed as the ref
+  - the kicker's and victim's boxes merge at low-blow contact
+  - **For 2.2 / 3.2:** a `merged` box still has one person's pose, and its per-box `raw_label` (the corner before merging) is in the cache.
 - **For 3.2 (motion features):** Garbrandt-Long still has duplicate frames after the 30 fps cap (a 25 fps source padded to 60, processed at stride 2). Velocity features must use real `t` deltas and handle repeated frames (zero motion on a repeat is not "stopped").
 - **Profile lookahead:** identity for a frame in the first 60 s of a fight uses the profile learned from those 60 s (same as 1.3). Live, this would be a calibration delay or learning from pre-fight footage. Noted, not changed.
 - openmmlab's model server throttles to ~100 KB/s per connection. On a new machine, pre-download the two model zips from rtmlib's Hugging Face mirror (see the 0.1 log entry).
 - **6 unofficial uploads** (Aspinall-Gane, Battle-Loosa, Garbrandt-Long, Holland-Malott, Munhoz-O'Malley, Edwards-Muhammad). Accepted for now; ask Cowork for official replacements in a data round. They can vanish or be re-uploaded with a different cut, which would break every timestamp for that fight. If a URL is swapped, the fight's window and known fouls have to be re-timed.
-- Edwards-Muhammad is 480p (under the 720p bar). Kept for train; check its row in the extract report and drop it if pose is poor.
+- Edwards-Muhammad is 480p (under the 720p bar). Kept: its extract row is fine (82% both or merged, 85% of visible).
 - Garbrandt-Long is a Russian broadcast at 1694x1080, 60 fps. 1.1 found it's a **25 fps source padded with duplicate frames** (58% of frames repeat the previous one), not interpolated. Motion features (3.2) must not read a zero velocity on a duplicate frame as "stopped". Munhoz-O'Malley is 50 fps with one-frame cross-blends at cuts.
 - Shot detection misses **dissolves** (gradual transitions). They only showed up in between-round segments (Garbrandt 12:16-13:36, Holland 20:13-21:13), which 4.2 skips.
 - Slow-motion replays can fire bursts of fake cuts (Battle-Loosa 09:40-09:43, 4 shots under 1 s). Replays are tagged in 4.2.
@@ -61,7 +80,131 @@ All work is on the RTX 2080 PC for now. When Ari moves to the 4090 PC (or any ne
 6. `uv run deepfoul doctor` must show `CUDAExecutionProvider` active. If it fails, pin onnxruntime-gpu to its CUDA 12 build before anything else.
 7. `deepfoul fetch` to rebuild `data/raw/` from `labels/fights.csv`.
 
+## Phase 1 summary (perception, done 2026-11-21)
+**Pipeline.** `deepfoul extract` makes one in-order pass per fight over its window:
+1. shots (PySceneDetect)
+2. YOLOX detection with loose crowd filters
+3. ByteTrack, reset at every cut
+4. RTMW 133-point pose, batched, on kept boxes only
+5. color descriptors
+6. identity from fight-wide color profiles learned in the first 60 s: `red | blue | ref | merged | none`, smoothed within tracklets, with merges using the past only
+
+Everything lands in `data/keypoints/<fight_id>.parquet`, one row per box: corner, raw label, box, track, 133 keypoints + scores, histograms. Identity re-runs from that cache in ~2 min with no GPU. `deepfoul render` draws any span from the cache, and `deepfoul bench` times every stage.
+
+**Data.** All 13 non-test fights are cached (9 train, 4 val; 405k processed frames, ~2 GB). Frame rate is capped at 30 fps.
+
+**Speed (RTX 2080).** Full pass 10.2 fps, ~11 h for the 13 fights, 3.1 GB VRAM. Detection (20.6 fps) and pose (23 fps) share the GPU about equally.
+
+**Quality.** Golden set:
+- stand-up, cuts, ref crossings and re-entries are correct
+- both-or-merged is 71-98% per clip
+- golden_04's clinch is a known failure (4.1)
+
+Per fight, b/m of visible is 78-96%, median 90.
+
+**Known blind spots** (most owned by 4.1):
+- **Clinches:** a tied-up pair is one `merged` box with one person's pose, so clinch knees and the contact frame of a kick have no per-fighter corner.
+- **Sticky merges:** a lone fighter stays `merged` in long stoppage close-ups.
+- **Fragment rule:** a fighter standing behind the other can be swallowed.
+- **Black shorts vs ref:** a fighter in black shorts seen from behind can be costed as the ref.
+- **Occluded fighter:** when the ref walks in front of a fighter, the pose in that fighter's box is the ref's.
+- **Breaks:** dissolves and replays aren't handled (4.2).
+- **Profile timing:** the identity profile needs the first 60 s of the fight.
+
+**What Phase 2 builds on.**
+- **2.1 labeling app:** reads only video + `fights.csv` / `events.csv`. The renderer can draw an optional overlay.
+- **2.2 stoppage finder:** reads the keypoint cache. Ref position and motion come from `ref` rows, fighter motion and hand-to-own-eye/groin from fighter keypoints. A long stoppage shows as merged/close-up stretches with a lone fighter (Cortes Acosta: 58% of the window is the poke break). Use `raw_label` where `corner` is `merged`.
+- **Velocity features (3.2):** must use real `t` deltas (Garbrandt-Long's duplicate frames).
+
 ## Log
+
+### 2026-11-21 · Section 1.5 · Overlay renderer v1 + benchmark
+**Built:**
+- **`viz/overlay.py`:**
+  - draws red / blue / purple `RED+BLUE` boxes with corner + surname tags, optional thin grey `none` and yellow `ref`, the `mm:ss.cc f<idx> shot N` timestamp and `CUT` on guard frames
+  - skeletons via rtmlib's `draw_skeleton` (coco133). Points under `kpt_conf_min` (0.3) are never drawn, and skeletons go only on red / blue / merged boxes.
+  - highlight dots: **fingertips** (hand offsets 4/8/12/16/20) + **eyes** (1, 2, face 59-70) for pokes, **hips / knees / ankles / feet** (11-22) for low blows
+  - `read_range` reads only the requested frames of a whole-fight parquet (pyarrow filter)
+  - only cached frames are written, so a stride-2 fight renders at 25 or 30 fps with every overlay from its own frame
+- **`deepfoul render <fight_id> [--start] [--end] [--skeleton] [--highlight poke|low_blow|both|none] [--speed 0.25] [--show-ref] [--hide-none] [--out]`:**
+  - Times can be `mm:ss(.cc)` or seconds (`io/fights.parse_time`).
+  - With `--speed` other than 1, frames are written at fps x speed with no audio. `clip_writer` takes an exact fractional rate.
+  - **`--sheet merged|single [--n] [--seed]`** writes a contact sheet of random merged or one-fighter frames to `outputs/extract_check/<fid>_<kind>.jpg`.
+  - **`--golden [--tag]`** renders every golden clip with skeletons from the **full-fight caches** to `outputs/renders/<tag>/`, plus 0.25x versions of the foul clips, with an index at `renders.md`. id-golden's `report.md` stays separate.
+  - `id-golden`'s renderer now calls the same code.
+- **`deepfoul bench [--fight] [--start] [--seconds]`** (`bench.py`, config `bench:`). After a 3 s untimed warm-up it times:
+  - decode only
+  - the full `perceive_span` pass, with its own per-stage detection, pose and descriptor timers
+  - identity on those rows
+  - the renderer with skeletons
+  - peak VRAM (nvidia-smi sampled every 0.5 s)
+
+  It writes `outputs/bench/<date>_<gpu>.md` + `.json`, including a batch-time estimate over all cached fights.
+- **Extract report flags** (config `extract.check`, replacing the hardcoded 70%):
+  - **check** = b/m of visible under 82%
+  - **low visible** = visible under 88%
+
+  The report was regenerated for all 13 fights. The 1.4 run's times are kept in `outputs/extract_report_1.4.md`.
+- **Tests:** 10 new tests in `tests/test_overlay.py`, plus 2 strict-xfail clinch tests in `test_identity.py` (108 passed, 2 xfailed). They cover the keypoint indices, box colors, the ref hidden by default, masked keypoints never drawn, no skeleton on the ref, the range read, sheet frame picks, `parse_time`, the check flags and the bench math.
+
+**Investigation (extract report follow-ups):**
+- **Cortes Acosta-Delija (val), 27% both / 67% both-or-merged.** This is mostly not a tracking failure:
+  - **58% of its window is the eye-poke stoppage.** The poke is at 03:29. The doctor check, replay review and restart run to ~08:45, then the KO at ~09:17 = `action_end_s`, so the window is right. Inside the stoppage it's mostly close-ups of one fighter.
+  - In the action frames: both 42%, both-or-merged **90%** (in line with the other fights). These heavyweights spend a lot of time clinched (48% of action frames merged).
+- **Merged contact sheets** (`<fid>_merged_{narrow,wide}_before.jpg`): 12 merged tiles at under 1.2x a single fighter's width + 12 over, sorted by eye.
+
+  | fight | real clinch / pair in one box | one fighter hides the other | lone fighter wrongly merged |
+  |---|---|---|---|
+  | Cortes Acosta-Delija | 13 | 1 | 10 |
+  | Barber-Grasso | 21 | 3 | 0 |
+  | Holland-Malott | 19 | 0 | 5 |
+
+  **The wrong ones are almost all from stoppages.** 8 of the 10 in Cortes are lone-fighter close-ups during the poke break (doctor check, a 73 s close-up shot). Holland's 5 are its low-blow timeouts and between-round split screens. Three causes:
+  - **Sticky merge:** while merged, the merged box stands in as the missing fighter's last box, so a lone fighter in a long shot stays merged.
+  - **Fragment rule:** a fighter partly behind the other (Cortes 00:39) had a box 72% inside the front fighter's box and was dropped as a "fragment".
+  - **Delija from behind costed as the ref** (Cortes 00:31).
+- **Holland-Malott and Garbrandt-Long, low b/m of visible:**
+
+  | fight | one-fighter frames (% of visible) | close-ups | other box labelled none/ref | no other box |
+  |---|---|---|---|---|
+  | Holland-Malott | 22% | 55% | 38% | 6% |
+  | Garbrandt-Long | 20% | 69% | 28% | 3% |
+  | Cortes Acosta-Delija | 19% | 74% | 25% | 1% |
+
+  Holland's sheet (`<fid>_single.jpg`, 24 tiles): 13 timeouts or close-ups (two low blows, so two long timeouts), 4 Holland in black shorts costed as the ref when seen from behind, 3 ground pair boxes labelled BLUE (the golden_04 failure type). Garbrandt is mostly close-ups (low priority, as Ari said).
+- **Merge fix tried and dropped.** I replaced the aspect gate, which never fired (`merge_aspect_min` 0.45 is below a lone fighter's 0.47-0.61), with "merged box at least 1.25x either fighter's last separate width". It regressed golden_04 (93 -> 74% b/m, 3 -> 16 jumps) and check_02/03 (2 -> 25, 7 -> 23 jumps). The measured ratios show why: real clinch boxes are about one fighter wide (median 1.04-1.07x in golden_04 and check_02), the same as the sticky close-ups (median 1.12x). A fighter's own box is already wide with arms out, and a clinched pair is compact.
+  - Following the plan (ship only without regressions), the gate was reverted and the problem goes to 4.1 with this evidence.
+  - Identity is unchanged, so there was no 13-fight re-run and no old/new report columns.
+  - **Intended behavior** is written into the `apply_merges` docstring and 2 strict-xfail tests: when one fighter fully hides the other, the visible one keeps their corner and the hidden one is missing.
+
+**Decisions:**
+- **The check moves to b/m of visible,** because plain both-or-merged mixes tracking quality with how much of the window is breaks and close-ups.
+  - 82% = median (90) - 8. It flags exactly the three fights looked at here: Holland 78, Garbrandt 80, Cortes 81.
+  - "low visible" < 88% flags Garbrandt (87) and Cortes (83).
+  - All three are now explained, so on new fights these bars mark outliers worth a sheet, not failures.
+- **Golden renders come from the full-fight caches,** the data every later section uses. Their both-or-merged matches the baseline on every clip.
+- **0.25x renders have no audio,** because slowed audio is useless and only confusing.
+- **No speed work:** 10 fps keeps the batch as one overnight run.
+
+**Verified:**
+- `render` on Barber-Grasso 14:00-14:10 (300 frames, 10.0 s, with audio) and on Munhoz-O'Malley, a stride-2 50 fps fight (250 frames at 25 fps, 10.0 s, so the overlay is in sync). 0.25x: 120 frames over 16 s.
+- **Golden renders** in `outputs/renders/1.5/`, checked by eye on frame grids:
+  - **golden_01 (poke):** fingertip dots on Battle's extended glove at Loosa's face at 08:09.6, eye contours on both faces. **At 08:08.4 the ref walks in front of Battle and the skeleton in Battle's box is the ref's** (pose takes the person in front).
+  - **golden_02 (low blow):** hip / knee / ankle / foot dots follow Malott's kicking leg through 05:02.4-05:03.1. At contact (05:02.73-05:02.90) the boxes merge into one `RED+BLUE` box, a 4.1 item for low-blow attribution.
+- **Benchmark:** see Key numbers. The full pass is 10.2 fps (1.4 measured 9.9).
+- `id-golden --from-cache --tag 1.5`: no regressions, golden_04 known fail. golden_03 has 2 jumps vs 1 in the baseline, within tolerance. Its fight profile was re-learned from the full-fight rows by `extract --all`.
+- `uv run pytest`: 108 passed, 2 xfailed. `git status`: nothing under `data/` or `outputs/`.
+
+**Golden set:** no regressions (identity unchanged). Baseline not updated.
+
+**Known issues:**
+- The 4.1 items above (sticky merges, fragment rule, black shorts vs ref, merge at kick contact, pose on an occluding ref).
+- `ffmpeg -shortest` drops the last video frame of a render with audio (299 of 300). It doesn't matter for review.
+- The bench reports VRAM as flat (3.1 GB) because onnxruntime's memory arena fills during the warm-up.
+
+**Next:**
+- Ari: watch `outputs/renders/1.5/` (see ROADMAP Now "Before the kickoff") and send the benchmark numbers + render notes to chat.
+- Then section 2.1 (labeling app).
 
 ### 2026-11-20 · Section 1.4 · Pose extraction and caching
 **Built:**

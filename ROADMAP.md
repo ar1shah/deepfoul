@@ -1,37 +1,39 @@
 # DeepFoul Roadmap
 
-## ▶ Now: 1.5 Overlay renderer v1 + benchmark
+## ▶ Now: 2.1 Labeling app
 
-**Before the kickoff (you, left over from 1.4)**
-1. Before bed, open a terminal and run:
-   ```
-   cd C:\Users\AriSh\Documents\projects\deepfoul
-   uv run deepfoul extract --all
-   ```
-   It runs the 9 train fights first, then the 4 val fights (Barber-Grasso is already done and gets skipped). It keeps the PC awake by itself and prints one line per minute of video with an ETA. Expect **about 11.5 h** in total, with train done after about 7 h. If it's still running in the morning, let it finish. If it stops (crash, reboot), run the same command again and it picks up where it left off.
-2. When it's done, open `outputs/extract_report.md`. Note any failed fights, and any fight with a **check** mark (both or merged under 70%). For a checked fight, also note its **b/m of visible**. If that's high, the low number comes from crowd and close-up shots, not tracking.
-3. Optional: `outputs/renders/1.4/` has the golden renders with 1.4's identity (`report.md` compares every clip to the golden baseline). golden_04's officials are fixed; the clinch at 14:03.8 is the known 4.1 failure.
+**Before the kickoff (you, left over from 1.5)**
+1. Watch every render in `outputs/renders/1.5/` (`renders.md` links them). golden_01 and golden_02 also have a **0.25x** version (no audio) for frame-by-frame checks:
+   - **golden_01 (poke):** the fingertip dots (big dots on the gloves) and eye dots should sit on the real hand and eyes around 08:09.
+   - **golden_02 (low blow):** the hip, knee, ankle and foot dots should follow Malott's kicking leg into Holland's groin around 05:02.7. At contact the two boxes become one `RED+BLUE` box (known, see 1.5 in PROGRESS).
+   - Known: at 08:08.4 in golden_01 the ref walks in front of Battle and the skeleton in Battle's box is the ref's.
+2. Optional: `outputs/extract_check/` has the contact sheets behind the Cortes Acosta / Holland / Garbrandt findings.
+3. **Send to chat:** the benchmark numbers (`outputs/bench/2026-11-21_rtx-2080.md`) plus anything that still looks wrong in the renders.
 
 **Kickoff prompt**
 ```
-Read CLAUDE.md, ROADMAP.md and PROGRESS.md. Plan section 1.5 only. Wait for my approval before writing code.
-Extract report notes: <failed fights, checked fights with their b/m of visible, or "all fine">.
+Read CLAUDE.md, ROADMAP.md and PROGRESS.md. Plan section 2.1 only. Wait for my approval before writing code.
+Render notes from 1.5: <anything wrong in the golden renders, or "all fine">.
 ```
 
 **Claude Code does**
-1. `deepfoul render <fight_id> --start --end`: red/blue boxes, corner labels, an optional skeleton toggle and a timestamp, all drawn from the cached keypoints (`data/keypoints/<fight_id>.parquet`, no GPU).
-2. `deepfoul bench`: processing speed (fps) for detection, pose, descriptors and the full extract pass on the current GPU.
-3. Render every golden clip with skeletons on, in `outputs/renders/1.5/`, and run the benchmark.
-4. Look into any fights flagged in the extract report. Re-set the report's "check" bar from the spread over all 13 fights.
+1. A local FastAPI app + a single HTML page, started with `uv run deepfoul label`, which opens `http://localhost:8000`.
+2. **Queue mode:** plays a clip around each candidate moment (default 4 s before, 4 s after) with speed control.
+3. **Full-fight mode:** `uv run deepfoul label --fight <fight_id>` opens a whole fight with a scrubber, for adding events by hand (used for val and test fights).
+4. Keyboard shortcuts:
+   - `1` eye poke, `2` low blow, `3` open hand, `4` hard negative, `5` clean
+   - `R` / `B` offender corner, `C` contact yes/no, `M` slow-motion
+   - `[` / `]` set start / end, `←` / `→` scrub, `Space` play/pause, `S` skip, `Enter` save and next
+5. Saves every row to `labels/events.csv` immediately, so nothing is lost on a crash.
+6. A practice queue made from the golden clips so it can be tested before mining exists.
 
 **Done when**
-- The golden set renders cleanly with skeletons, and the benchmark numbers are in PROGRESS.md.
+- Ari can label 30 moments in under 10 minutes, mostly with the keyboard.
 
 **You do**
-1. Watch every golden render. On the poke clip, check that the fingertip and eye points follow the actual hand and eye.
-2. Optional: post a clip or screenshot if you're building in public.
-
-**Send to chat:** the benchmark numbers plus anything that still looks wrong in the renders.
+1. Run `uv run deepfoul label` and do the practice queue.
+2. Write down everything slow or annoying (missing shortcuts, clip too short, video loads slowly).
+3. If the list is long, paste it into a quick fix session before 2.2. Otherwise paste it into the 2.2 kickoff prompt.
 
 ---
 
@@ -101,34 +103,13 @@ Variety: at least 2 women's fights, at least 1 fight with similar or dark shorts
 
 ## Phase 1: Perception pipeline (the "eyes")
 
-1.5 is in progress (see **Now** at the top).
+Done (see the **Done** list).
 
 ---
 
 ## Phase 2: Data engine
 
-### 2.1 Labeling app
-
-**Kickoff prompt**: standard.
-
-**Claude Code does**
-1. A local FastAPI app + a single HTML page, started with `uv run deepfoul label`, which opens `http://localhost:8000`.
-2. **Queue mode:** plays a clip around each candidate moment (default 4 s before, 4 s after) with speed control.
-3. **Full-fight mode:** `uv run deepfoul label --fight <fight_id>` opens a whole fight with a scrubber, for adding events by hand (used for val and test fights).
-4. Keyboard shortcuts:
-   - `1` eye poke, `2` low blow, `3` open hand, `4` hard negative, `5` clean
-   - `R` / `B` offender corner, `C` contact yes/no, `M` slow-motion
-   - `[` / `]` set start / end, `←` / `→` scrub, `Space` play/pause, `S` skip, `Enter` save and next
-5. Saves every row to `labels/events.csv` immediately, so nothing is lost on a crash.
-6. A practice queue made from the golden clips so it can be tested before mining exists.
-
-**Done when**
-- Ari can label 30 moments in under 10 minutes, mostly with the keyboard.
-
-**You do**
-1. Run `uv run deepfoul label` and do the practice queue.
-2. Write down everything slow or annoying (missing shortcuts, clip too short, video loads slowly).
-3. If the list is long, paste it into a quick fix session before 2.2. Otherwise paste it into the 2.2 kickoff prompt.
+2.1 is in progress (see **Now** at the top).
 
 ### 2.2 Stoppage finder
 
@@ -274,6 +255,12 @@ Label mistakes to fix: <fight_id mm:ss what's wrong>.
 **Claude Code does**
 1. Fix the label mistakes Ari listed.
 2. Fix the chosen buckets (likely: keypoint smoothing, ID handling in clinches, depth ambiguity). **ID handling in clinches** includes golden_04, a known failure in `labels/golden_baseline.csv`: at 14:03.8 the detector gives a wide box for the pair (labelled BLUE) plus a fragment (labelled RED) instead of one `merged` box. Also: merged clinch frames have no per-fighter pose (clinch knees). Identity re-runs from the keypoint cache (`extract --from-cache`, ~2 min per fight), so no GPU re-run is needed.
+   Evidence from 1.5 (`outputs/extract_check/`, details in PROGRESS):
+   - **Sticky merges:** in long one-fighter close-ups (doctor checks, foul timeouts) a lone fighter stays `merged` for the whole shot. This is 10 of 24 sampled merged tiles in Cortes Acosta-Delija and 5 of 24 in Holland-Malott. A box-width gate was tried and dropped, because real clinch boxes are no wider than one fighter.
+   - **Fragment rule:** a fighter standing behind the other can be swallowed as a "fragment".
+   - **Ref confusion:** a fighter in black shorts seen from behind gets costed as the ref (Holland, Delija).
+   - **Intended behavior:** when one fighter fully hides the other, the visible one keeps their own corner and the hidden one is just missing, with no merged box. Two strict-xfail tests in `tests/test_identity.py` encode this.
+   - **Kick at contact:** the kicker's and the victim's boxes become one `merged` box (golden_02 05:02.7), so a low blow has no per-fighter corner on the contact frame. The per-box `raw_label` is still in the cache.
 3. Tune thresholds on **val only**.
 4. Re-run eval and the golden set (`id-golden`, compared against `labels/golden_baseline.csv`), and make a new review reel. Update the baseline for anything fixed.
 
@@ -444,6 +431,9 @@ Shorts colors for all 15 fights (`shorts-check`), RTMW pose once per kept box in
 
 ### 1.4 Pose extraction and caching ✅
 `deepfoul extract` runs one in-order pass per fight (shots, detect, track, RTMW, color descriptors on CPU threads, then identity) into `data/keypoints/<fight_id>.parquet` (corner, box, 133 keypoints, histograms). It resumes by shot-aligned parts, caps the rate at 30 fps, keeps the PC awake and writes `outputs/extract_report.md`. `--all` skips test fights and runs train before val. Identity re-runs from cache with `--from-cache` (~2 min per fight). A small weak-corner guard clears the seated officials in golden_04. `labels/golden_baseline.csv` records golden_04's clinch as a known 4.1 failure. Barber-Grasso: 9.9 fps, 90% both or merged.
+
+### 1.5 Overlay renderer v1 + benchmark ✅
+`deepfoul render` draws boxes, corner tags and optional skeletons from the keypoint cache: no GPU, `--speed 0.25`, `--sheet merged|single` contact sheets. `render --golden` renders to `outputs/renders/1.5/`. `deepfoul bench`: full extract pass 10.2 fps on the RTX 2080 (3.1 GB VRAM). The extract report now flags b/m of visible < 82% and visible < 88%. The three low fights are long foul stoppages and close-ups; sticky merges and the other identity misses go to 4.1.
 
 ---
 
