@@ -19,13 +19,18 @@ dependencies = [
     "onnxruntime-gpu[cuda,cudnn]; sys_platform != 'darwin'",
     "onnxruntime; sys_platform == 'darwin'",
     "trackers>=2.7.0",
+    "fastapi>=0.165.0",
+    "uvicorn>=0.54.0",
 ]
 
 [project.scripts]
 deepfoul = "deepfoul.cli:app"
 
 [dependency-groups]
-dev = ["pytest"]
+dev = [
+    "httpx>=0.28.1",
+    "pytest",
+]
 
 [tool.uv]
 # rtmlib depends on CPU `onnxruntime`, which shares a package folder with

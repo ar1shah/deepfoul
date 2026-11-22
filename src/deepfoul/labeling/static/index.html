@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DeepFoul labeling</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div id="banner" class="banner hidden"></div>
+<header>
+  <span class="brand">DeepFoul · labeling</span>
+  <span id="mode"></span>
+  <span id="progress"></span>
+  <span id="pace"></span>
+  <span class="spacer"></span>
+  <span class="muted">writes to <code id="events-path"></code></span>
+  <button id="help-btn" title="Keyboard shortcuts (?)">?</button>
+</header>
+<main>
+  <section class="player">
+    <div class="fight-line"><span id="fight-name"></span> <span id="item-reason" class="muted"></span></div>
+    <div class="video-wrap">
+      <video id="video" preload="auto"></video>
+      <div id="video-msg" class="video-msg hidden"></div>
+    </div>
+    <video id="preload" preload="auto" muted class="hidden"></video>
+    <div class="readout">
+      <span id="time">--:--.--</span>
+      <span id="frame" class="muted"></span>
+      <span id="rate" class="pill">1x</span>
+      <span id="playstate" class="muted"></span>
+    </div>
+    <div id="timeline" class="timeline">
+      <div id="tl-draft" class="tl-draft"></div>
+      <div id="tl-marks"></div>
+      <div id="tl-cand" class="tl-cand hidden"></div>
+      <div id="tl-head" class="tl-head"></div>
+    </div>
+    <div class="tl-labels"><span id="tl-left"></span><span id="tl-right"></span></div>
+  </section>
+  <aside class="panel">
+    <h2 id="draft-title">New event</h2>
+    <div class="field"><label>type</label>
+      <div class="choices" data-field="foul_type">
+        <button data-v="eye_poke"><kbd>1</kbd> eye poke</button>
+        <button data-v="low_blow"><kbd>2</kbd> low blow</button>
+        <button data-v="open_hand"><kbd>3</kbd> open hand</button>
+        <button data-v="hard_negative"><kbd>4</kbd> hard neg</button>
+        <button data-v="clean"><kbd>5</kbd> clean</button>
+      </div></div>
+    <div class="field"><label>offender</label>
+      <div class="choices" data-field="offender">
+        <button data-v="red" class="red"><kbd>R</kbd> <span id="red-name">red</span></button>
+        <button data-v="blue" class="blue"><kbd>B</kbd> <span id="blue-name">blue</span></button>
+        <button data-v="none">none</button>
+      </div></div>
+    <div class="field"><label>contact <kbd>C</kbd></label>
+      <div class="choices" data-field="contact">
+        <button data-v="yes">yes</button><button data-v="no">no</button><button data-v="unsure">unsure</button>
+      </div></div>
+    <div class="field"><label>ref stopped <kbd>T</kbd></label>
+      <div class="choices" data-field="ref_stopped">
+        <button data-v="yes">yes</button><button data-v="no">no</button>
+      </div></div>
+    <div class="field"><label>footage <kbd>M</kbd></label>
+      <div class="choices" data-field="speed">
+        <button data-v="live">live</button><button data-v="slowmo">slow-mo</button>
+      </div></div>
+    <div class="field"><label>start <kbd>[</kbd> / end <kbd>]</kbd></label>
+      <div><span id="start-s"></span> → <span id="end-s"></span></div></div>
+    <div class="field"><label>notes <kbd>N</kbd></label>
+      <input id="notes" type="text" autocomplete="off" placeholder="optional"></div>
+    <div class="actions">
+      <button id="save-next" class="primary"><kbd>Enter</kbd> save + next</button>
+      <button id="save-stay"><kbd>Shift+Enter</kbd> save + stay</button>
+      <button id="skip"><kbd>S</kbd> skip</button>
+      <button id="new-draft">clear</button>
+    </div>
+    <div id="msg" class="msg"></div>
+    <h3>This fight's events</h3>
+    <ul id="event-list" class="list"></ul>
+    <h3 id="queue-title">Queue</h3>
+    <ul id="queue-list" class="list"></ul>
+  </aside>
+</main>
+<div id="help" class="help hidden">
+  <div class="help-box">
+    <h2>Keys</h2>
+    <table>
+      <tr><td><kbd>1</kbd>-<kbd>5</kbd></td><td>eye poke, low blow, open hand, hard negative, clean</td></tr>
+      <tr><td><kbd>R</kbd> / <kbd>B</kbd></td><td>offender red / blue (again: none)</td></tr>
+      <tr><td><kbd>C</kbd></td><td>contact: yes → no → unsure</td></tr>
+      <tr><td><kbd>T</kbd></td><td>ref stopped yes / no</td></tr>
+      <tr><td><kbd>M</kbd></td><td>footage live / slow-mo (label only, not playback)</td></tr>
+      <tr><td><kbd>[</kbd> / <kbd>]</kbd></td><td>set start / end at the current frame</td></tr>
+      <tr><td><kbd>Space</kbd></td><td>play / pause (after the clip end: replay the clip)</td></tr>
+      <tr><td><kbd>←</kbd> / <kbd>→</kbd></td><td>scrub 1 s (<kbd>Shift</kbd>: 5 s)</td></tr>
+      <tr><td><kbd>,</kbd> / <kbd>.</kbd></td><td>one frame back / forward</td></tr>
+      <tr><td><kbd>-</kbd> / <kbd>=</kbd></td><td>playback speed 0.25 / 0.5 / 1 / 2</td></tr>
+      <tr><td><kbd>Enter</kbd></td><td>save and next (updates a loaded event)</td></tr>
+      <tr><td><kbd>Shift+Enter</kbd></td><td>save and stay on this clip</td></tr>
+      <tr><td><kbd>S</kbd></td><td>skip this item</td></tr>
+      <tr><td><kbd>U</kbd></td><td>undo the last save (deletes that row, goes back to it)</td></tr>
+      <tr><td><kbd>N</kbd> / <kbd>Esc</kbd></td><td>type a note / leave the note field</td></tr>
+      <tr><td><kbd>?</kbd></td><td>this help</td></tr>
+    </table>
+    <p class="muted">Click an event on the timeline or in the list to edit it. Click the timeline to seek.</p>
+  </div>
+</div>
+<script src="/static/app.js"></script>
+</body>
+</html>

@@ -986,5 +986,75 @@ def pd_read(path):
     return pd.read_parquet(path)
 
 
+@app.command()
+def label(
+    queue: str = typer.Option(None, "--queue", help="Queue name in data/queues/ (default: practice)."),
+    fight: str = typer.Option(None, "--fight", help="Full-fight mode for this fight_id."),
+    events: Path = typer.Option(None, "--events", help="Events CSV to write (default: "
+                                "labels/events.csv; the practice queue uses its own file)."),
+    port: int = typer.Option(None, "--port", help="Port (default from config, 8000)."),
+    no_browser: bool = typer.Option(False, "--no-browser", help="Don't open a browser tab."),
+    rebuild: bool = typer.Option(False, "--rebuild", help="Rebuild the practice queue."),
+) -> None:
+    """Local labeling app: a queue of moments, or a whole fight with --fight."""
+    import webbrowser
+
+    import uvicorn
+
+    from deepfoul.io.fetch import read_fights
+    from deepfoul.labeling.app import create_app
+    from deepfoul.labeling.queues import (build_practice_queue, load_queue, queue_path,
+                                          read_csv, write_queue)
+
+    cfg = load_config()
+    lab = cfg["labeling"]
+    labels = cfg["paths"]["labels"]
+    if queue and fight:
+        raise typer.BadParameter("give --queue or --fight, not both")
+    fights = {f["fight_id"].strip(): f for f in read_fights(labels / "fights.csv")}
+    items, skips_path = None, None
+    if fight:
+        if fight not in fights:
+            raise typer.BadParameter(f"unknown fight_id {fight!r}")
+        if not (cfg["paths"]["raw"] / f"{fight}.mp4").is_file():
+            raise typer.BadParameter(f"{fight}: no video, run `deepfoul fetch`")
+        mode, default_events = "fight", labels / "events.csv"
+    else:
+        queue = queue or "practice"
+        qpath = queue_path(cfg, queue)
+        if queue == "practice":
+            default_events = cfg["root"] / lab["practice_events"]
+            if rebuild or not qpath.exists():
+                available = {fid for fid in fights if (cfg["paths"]["raw"] / f"{fid}.mp4").is_file()}
+                built = build_practice_queue(
+                    list(fights.values()), read_csv(labels / "golden.csv"),
+                    read_csv(labels / "notes" / "known_fouls.csv"), available,
+                    n=lab["practice_n"], seed=lab["practice_seed"], gap=lab["min_gap_s"],
+                    pad_before=lab["pad_before_s"], pad_after=lab["pad_after_s"])
+                write_queue(built, qpath)
+                typer.echo(f"practice queue: {len(built)} items -> {qpath}")
+        else:
+            default_events = labels / "events.csv"
+            if not qpath.exists():
+                raise typer.BadParameter(f"no queue file {qpath}")
+        items = load_queue(qpath)
+        skips_path = qpath.with_suffix(".skips.json")
+        mode = "queue"
+    events_path = (events if events else default_events).resolve()
+    if events_path == (labels / "events.csv").resolve():
+        typer.secho("writing labels/events.csv: git pull before labeling, commit and push after "
+                    "(event ids are max + 1 and collide across machines otherwise)", fg="yellow")
+    port = port or lab["port"]
+    url = f"http://localhost:{port}"
+    typer.echo(f"{mode}: {queue or fight} -> {events_path}")
+    typer.echo(f"open {url} in Chrome or Edge (Ctrl+C stops)")
+    app_ = create_app(cfg, events_path, mode, queue=items, queue_name=queue, fight_id=fight,
+                      skips_path=skips_path)
+    if not no_browser:
+        import threading
+        threading.Timer(1.0, lambda: webbrowser.open(url)).start()
+    uvicorn.run(app_, host="127.0.0.1", port=port, log_level="warning")
+
+
 if __name__ == "__main__":
     app()
