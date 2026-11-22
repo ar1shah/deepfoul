@@ -1,39 +1,37 @@
 # DeepFoul Roadmap
 
-## ▶ Now: 2.1 Labeling app
+## ▶ Now: 2.2 Stoppage finder
 
-**Before the kickoff (you, left over from 1.5)**
-1. Watch every render in `outputs/renders/1.5/` (`renders.md` links them). golden_01 and golden_02 also have a **0.25x** version (no audio) for frame-by-frame checks:
-   - **golden_01 (poke):** the fingertip dots (big dots on the gloves) and eye dots should sit on the real hand and eyes around 08:09.
-   - **golden_02 (low blow):** the hip, knee, ankle and foot dots should follow Malott's kicking leg into Holland's groin around 05:02.7. At contact the two boxes become one `RED+BLUE` box (known, see 1.5 in PROGRESS).
-   - Known: at 08:08.4 in golden_01 the ref walks in front of Battle and the skeleton in Battle's box is the ref's.
-2. Optional: `outputs/extract_check/` has the contact sheets behind the Cortes Acosta / Holland / Garbrandt findings.
-3. **Send to chat:** the benchmark numbers (`outputs/bench/2026-11-21_rtx-2080.md`) plus anything that still looks wrong in the renders.
+**Before the kickoff (you, left over from 2.1)**
+1. Run `uv run deepfoul label` and label the 30 practice moments with a timer. The header shows "this session: N saved in m:ss". Use Chrome or Edge (the videos are VP9 / AV1 with Opus audio). These labels go to `outputs/label_practice/events.csv`, not `labels/events.csv`.
+2. Write down everything slow or annoying (missing shortcuts, clip too short, video loads slowly). In particular, check that `[` `]` `,` `.` `-` `=` work on your keyboard, since Claude Code could only test them with synthetic key events.
+3. If the list is long, paste it into a quick fix session before 2.2. Otherwise paste it into the kickoff prompt below.
 
 **Kickoff prompt**
 ```
-Read CLAUDE.md, ROADMAP.md and PROGRESS.md. Plan section 2.1 only. Wait for my approval before writing code.
-Render notes from 1.5: <anything wrong in the golden renders, or "all fine">.
+Read CLAUDE.md, ROADMAP.md and PROGRESS.md. Plan section 2.2 only. Wait for my approval before writing code.
+Practice run: <N> moments in <m:ss>. Labeling app fixes: <list, or "none">.
 ```
 
 **Claude Code does**
-1. A local FastAPI app + a single HTML page, started with `uv run deepfoul label`, which opens `http://localhost:8000`.
-2. **Queue mode:** plays a clip around each candidate moment (default 4 s before, 4 s after) with speed control.
-3. **Full-fight mode:** `uv run deepfoul label --fight <fight_id>` opens a whole fight with a scrubber, for adding events by hand (used for val and test fights).
-4. Keyboard shortcuts:
-   - `1` eye poke, `2` low blow, `3` open hand, `4` hard negative, `5` clean
-   - `R` / `B` offender corner, `C` contact yes/no, `M` slow-motion
-   - `[` / `]` set start / end, `←` / `→` scrub, `Space` play/pause, `S` skip, `Enter` save and next
-5. Saves every row to `labels/events.csv` immediately, so nothing is lost on a crash.
-6. A practice queue made from the golden clips so it can be tested before mining exists.
+1. Scans cached keypoints for candidate foul moments, using signals that don't need a foul model:
+   - The ref moves quickly between or toward the fighters
+   - Both fighters' motion drops sharply (action paused)
+   - A fighter's hand goes to his own eye or groin region and stays there
+   - A fighter bends over at the waist
+2. Scores each moment and builds a ranked queue per fight (`deepfoul mine <fight_id>`, `deepfoul mine --all`). Queues use the 2.1 format, `data/queues/<name>.csv` (`item_id, fight_id, t_s, score, reason`), with items at least `labeling.min_gap_s` (10 s) apart so one label can't close two items.
+3. Runs `mine --all` on every extracted train fight.
+4. Checks the known fouls from `labels/notes/starter_fights.md` and reports how many land in the top 20 per fight.
+5. Applies any labeling app fixes from the practice run.
 
 **Done when**
-- Ari can label 30 moments in under 10 minutes, mostly with the keyboard.
+- Most known fouls appear in their fight's top 20 candidates.
 
 **You do**
-1. Run `uv run deepfoul label` and do the practice queue.
-2. Write down everything slow or annoying (missing shortcuts, clip too short, video loads slowly).
-3. If the list is long, paste it into a quick fix session before 2.2. Otherwise paste it into the 2.2 kickoff prompt.
+1. Run `uv run deepfoul label --queue mined` and label every candidate (`git pull` first, then commit and push `labels/events.csv` after):
+   - Real fouls: `1` eye poke or `2` low blow, plus the offender corner (`R`/`B`) and contact (`C`).
+   - Stoppages for other reasons (a cut, a ref warning, a slip, a glove touch): `5` clean, with a short note (`N`). These also work as hard negatives.
+2. Don't label val or test fights from the queue. They get full-fight labeling later.
 
 ---
 
@@ -109,30 +107,7 @@ Done (see the **Done** list).
 
 ## Phase 2: Data engine
 
-2.1 is in progress (see **Now** at the top).
-
-### 2.2 Stoppage finder
-
-**Kickoff prompt**: standard, plus any labeling app fixes.
-
-**Claude Code does**
-1. Scans cached keypoints for candidate foul moments, using signals that don't need a foul model:
-   - The ref moves quickly between or toward the fighters
-   - Both fighters' motion drops sharply (action paused)
-   - A fighter's hand goes to his own eye or groin region and stays there
-   - A fighter bends over at the waist
-2. Scores each moment and builds a ranked queue per fight (`deepfoul mine <fight_id>`, `deepfoul mine --all`).
-3. Runs `mine --all` on every extracted train fight.
-4. Checks the known fouls from `labels/notes/starter_fights.md` and reports how many land in the top 20 per fight.
-
-**Done when**
-- Most known fouls appear in their fight's top 20 candidates.
-
-**You do**
-1. Run `uv run deepfoul label --queue mined` and label every candidate:
-   - Real fouls: `1` eye poke or `2` low blow, plus the offender corner and contact.
-   - Stoppages for other reasons (a cut, a ref warning, a slip, a glove touch): `5` clean, with a short note. These also work as hard negatives.
-2. Don't label val or test fights from the queue. They get full-fight labeling later.
+2.1 is done. 2.2 is in progress (see **Now** at the top).
 
 ### 2.3 Dataset builder + ingest
 
@@ -261,6 +236,7 @@ Label mistakes to fix: <fight_id mm:ss what's wrong>.
    - **Ref confusion:** a fighter in black shorts seen from behind gets costed as the ref (Holland, Delija).
    - **Intended behavior:** when one fighter fully hides the other, the visible one keeps their own corner and the hidden one is just missing, with no merged box. Two strict-xfail tests in `tests/test_identity.py` encode this.
    - **Kick at contact:** the kicker's and the victim's boxes become one `merged` box (golden_02 05:02.7), so a low blow has no per-fighter corner on the contact frame. The per-box `raw_label` is still in the cache.
+   - **One skeleton per merged box:** top-down pose gives a merged box one skeleton, so the other fighter's keypoints vanish at contact (golden_02 05:02.7, close exchanges in golden 3-6). Candidate fix: while merged, run pose on each fighter's last known box. Pull forward if 3.3 shows it.
 3. Tune thresholds on **val only**.
 4. Re-run eval and the golden set (`id-golden`, compared against `labels/golden_baseline.csv`), and make a new review reel. Update the baseline for anything fixed.
 
@@ -434,6 +410,9 @@ Shorts colors for all 15 fights (`shorts-check`), RTMW pose once per kept box in
 
 ### 1.5 Overlay renderer v1 + benchmark ✅
 `deepfoul render` draws boxes, corner tags and optional skeletons from the keypoint cache: no GPU, `--speed 0.25`, `--sheet merged|single` contact sheets. `render --golden` renders to `outputs/renders/1.5/`. `deepfoul bench`: full extract pass 10.2 fps on the RTX 2080 (3.1 GB VRAM). The extract report now flags b/m of visible < 82% and visible < 88%. The three low fights are long foul stoppages and close-ups; sticky merges and the other identity misses go to 4.1.
+
+### 2.1 Labeling app ✅
+`deepfoul label`: a local FastAPI app + one plain HTML/JS page that streams the raw video with Range requests (Chrome/Edge; VP9/AV1/Opus), with queue mode (`data/queues/<name>.csv`, clip `t ± 4 s`) and full-fight mode (`--fight`), keyboard labeling and every save fsynced to `events.csv`. Practice queue of 30 train moments writes to `outputs/label_practice/`. Seeks under 0.5 s on all codecs; the browser frame matches the original-file frame. Ari's timed practice run is pending (see Now).
 
 ---
 

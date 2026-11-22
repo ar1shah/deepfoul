@@ -12,7 +12,7 @@ Claude Code updates this file at the end of every ROADMAP section. Newest entrie
 | 1 | 1.3 Identity: ref filter and red/blue | Done (stand-up and cuts correct; golden_04 clinch partly wrong, see log) |
 | 1 | 1.4 Pose extraction and caching | Done (all 13 non-test fights cached, 11h15m overnight) |
 | 1 | 1.5 Overlay renderer v1 + benchmark | Done (golden renders with skeletons, 10.2 fps full pass) |
-| 2 | 2.1 Labeling app | Not started |
+| 2 | 2.1 Labeling app | Done (practice queue + full-fight mode; Ari's timed 30-moment run pending) |
 | 2 | 2.2 Stoppage finder | Not started |
 | 2 | 2.3 Dataset builder | Not started |
 | 3 | 3.1 Evaluation harness | Not started |
@@ -45,6 +45,7 @@ Claude Code updates this file at the end of every ROADMAP section. Newest entrie
   - The 13 non-test fights (405k processed frames) take **~11 h** of extract (measured: 11h15m).
 - Shot detection (CPU decode): ~190 fps at 1080p30, ~110 fps at 60 fps. All 9 train fights: ~38 min.
 - Labeled positives: eye_poke - / low_blow - / open_hand -
+- Labeling app (2.1): seek 15-475 ms on H.264 / VP9 / AV1 in Chromium, item switch ≤ 0.8 s, browser frame = original-file frame on 6/6 checks
 - Fights: train 9 / val 4 / test 2 (8 foul, 5 clean, 2 test). Known fouls: 16 (`labels/notes/known_fouls.csv`)
 - Val fights: Cortes Acosta-Delija, Kape-Silva, Gaethje-Holloway, Garry-Prates (6 known fouls). Kape-Silva and Garbrandt-Long swapped splits after 0.2, because Garbrandt-Long's video is cropped and likely frame-interpolated.
 - Best val metrics: -
@@ -59,6 +60,8 @@ Claude Code updates this file at the end of every ROADMAP section. Newest entrie
   - a fighter in black shorts seen from behind is costed as the ref
   - the kicker's and victim's boxes merge at low-blow contact
   - **For 2.2 / 3.2:** a `merged` box still has one person's pose, and its per-box `raw_label` (the corner before merging) is in the cache.
+- **For 3.2, eye zone during a poke (1.5 render review):** golden_01's victim eye keypoints drop below `kpt_conf_min` during the poke itself (hand covers the eye + motion blur). Estimate the eye zone from the head (nose, ears, face points, last known eye position), not the eye points alone.
+- **For 4.1 (pull forward if 3.3 shows it), one skeleton per merged box (1.5 render review):** at golden_02 05:02.7 and in close exchanges in golden 3-6, a merged box gets only one skeleton (top-down pose = one per box), so the other fighter's keypoints vanish at contact. This is the biggest risk for low blows. Candidate fix: while merged, run pose on each fighter's last known box instead of the merged box.
 - **For 3.2 (motion features):** Garbrandt-Long still has duplicate frames after the 30 fps cap (a 25 fps source padded to 60, processed at stride 2). Velocity features must use real `t` deltas and handle repeated frames (zero motion on a repeat is not "stopped").
 - **Profile lookahead:** identity for a frame in the first 60 s of a fight uses the profile learned from those 60 s (same as 1.3). Live, this would be a calibration delay or learning from pre-fight footage. Noted, not changed.
 - openmmlab's model server throttles to ~100 KB/s per connection. On a new machine, pre-download the two model zips from rtmlib's Hugging Face mirror (see the 0.1 log entry).
@@ -117,6 +120,95 @@ Per fight, b/m of visible is 78-96%, median 90.
 - **Velocity features (3.2):** must use real `t` deltas (Garbrandt-Long's duplicate frames).
 
 ## Log
+
+### 2026-11-21 · Section 2.1 · Labeling app
+**Built:**
+- **`deepfoul label [--queue NAME] [--fight ID] [--events PATH] [--port] [--no-browser] [--rebuild]`**
+  - It starts a local FastAPI app on `127.0.0.1` (config `labeling:`, port 8000) and opens the browser.
+  - With no args it opens the **practice queue**, which writes to `outputs/label_practice/events.csv`.
+  - `--queue <name>` and `--fight` write to `labels/events.csv`, and then the CLI prints a "git pull before labeling, commit and push after" reminder.
+- **`labeling/events_store.py`:**
+  - schema, enums and `validate_event`:
+    - eye poke, low blow and open hand need offender red or blue
+    - every field must be set
+    - `0 ≤ start ≤ end`
+    - an event outside the fight window is a warning, not an error
+  - `EventStore`:
+    - appends one line, then flushes and fsyncs
+    - edits and deletes rewrite to a temp file + `os.replace`
+    - ids are `ev_NNNNN` (max + 1)
+    - refuses a bad header and tolerates a missing final newline
+- **`labeling/queues.py`:**
+  - Queue files are `data/queues/<name>.csv` (`item_id, fight_id, t_s, score, reason`), the format 2.2/2.3 write.
+  - The practice queue is the 6 golden clips + the other 6 train known fouls + 18 seeded random train moments, shuffled:
+    - golden foul clips use the foul time, other clips their midpoint, known fouls `live_s`
+    - items are ≥ 10 s apart, and random moments are ≥ 10 s from every known foul (live and replay) and golden clip
+  - **Done** means an event of the same fight overlaps the item's clip window `[t-4, t+4]`. It's derived from the events file, so it carries across machines. Skips are local (`<name>.skips.json`).
+- **`labeling/app.py` + `static/` (plain HTML/JS/CSS):**
+  - The video streams straight from `data/raw/` with HTTP Range requests (Starlette `FileResponse` 206), with no clips and no re-encode.
+  - Each fight's ffprobe (~2 s) is warmed in a background thread at startup.
+  - The timeline shows the clip/fight window, the candidate time, the draft span (dashed = auto `t ± 0.5 s`) and existing events (click to edit). The panel has every field, plus the queue list and this fight's events.
+  - Queue mode plays `[t-4, t+4]`, stops at the clip end (`Space` replays) and preloads the next fight's video. Full-fight mode is a scrubber over the fight window.
+  - **Keys:**
+    - ROADMAP set, with `M` = footage `speed` live/slowmo (a label, not playback)
+    - `T` ref stopped
+    - `Shift+←/→` 5 s
+    - `,` / `.` frame step
+    - `-` / `=` playback 0.25-2x
+    - `Shift+Enter` save and stay
+    - `U` undo (deletes an add and returns to its item with the values in the form; restores the old values of an edit)
+    - `N` notes
+    - `?` help
+  - **Defaults:** `5 clean` sets offender none + contact no. `4 hard negative` sets offender none and leaves contact unset until `C`.
+  - The time readout and `[` / `]` use `requestVideoFrameCallback` `mediaTime` (the presented frame's time).
+  - `[ ] , . - =` also match by physical key (`e.code`), so they work on non-US layouts.
+  - Keys are ignored while the next clip loads, so a fast key can't land on the previous item's draft.
+  - A non-Chromium browser gets a banner, and a decode error names the fight + codecs.
+- **Tests:** 22 new in `tests/test_labeling.py` (130 passed, 2 xfailed). They cover:
+  - the store (round trip, ids, update/delete, header, missing newline)
+  - validation (offender rule, hard negative contact)
+  - the practice queue (contents, determinism, spacing, one label closes exactly one item)
+  - `golden_t` and done derivation
+  - the API through TestClient (CRUD, 422 on invalid, skip, Range 206, unknown fight 404)
+- Deps: `fastapi`, `uvicorn`; dev `httpx`.
+
+**Decisions:**
+- **Ari picked 1A / 2A / 3A:** stream the raw file, practice labels in a separate file, and the 30-item practice mix.
+- **Chrome/Edge only:** the raw videos are VP9 / AV1 / H.264 with **Opus audio in MP4**, which Chromium plays and Safari may not. Use Chrome on the Mac.
+- The probe warm-up and the loading key guard were added after the first live run, when a key pressed during a 2.2 s probe landed on the previous item.
+
+**Verified (built-in browser pane, Chromium):**
+- **Queue flow on the real practice queue:** I labeled with keys only (clean; hard negative + `C`; eye poke + `B` `C` `T` with `Shift+Enter`, then open hand + `R` `C` `C`). Each row was in the CSV right after the key, eye poke without an offender was refused, and `U` deleted the last row and went back to it.
+- **Seek speed** (`seeked` event, five seeks per fight incl. 200 s jumps):
+
+  | fight | codec | ms |
+  |---|---|---|
+  | Battle-Loosa | H.264 | 27-475 |
+  | Barber-Grasso | VP9 | 15-204 |
+  | Holland-Malott | AV1 | 57-181 |
+
+  All are under 1 s, so no proxy is needed for AV1 on the 2080. Switching items (load fight + seek) takes 9-790 ms.
+- **Timeline vs the original file:** for each of the 3 fights, at window start + 30 s and at 80% of the window, I took the browser's presented frame (`mediaTime`, 64x36 grey fingerprint). I compared it to the frames `iter_frames` reads (frame-exact vs ffmpeg since 1.1) at that index and at ±1 and ±2 frames. **The best match is offset 0 in all 6**, e.g. Barber-Grasso 857.157 s: 2.4 vs 4.4 / 5.4 at ±1.
+- **Crash safety:** the server was hard-killed (`Stop-Process -Force`) after 3 rows. All rows were intact, and a restart resumed at practice_04.
+- **Full-fight mode** on `ufc300_gaethje_holloway` (val) with `--events outputs/label_test/events.csv`:
+  - add, edit from the list (PUT), undo of the edit (old values back), add + undo (row deleted)
+  - hard negative without contact refused
+  - the decode-error message ("Can't play ufc300_gaethje_holloway (video vp9, audio opus), media error 4")
+  - the `labels/events.csv` reminder line
+  - `git diff --exit-code labels/events.csv` is clean, and the test file and my practice rows are deleted
+- `uv run pytest`: 130 passed, 2 xfailed. `git status`: nothing under `data/` or `outputs/`.
+
+**Golden set:** n/a (no perception change).
+
+**Known issues:**
+- **Not tested with real key presses:** the browser tool can't send `[ ] , .` as keydown events. Those keys were checked with synthetic keydown events (US `key` and a German-layout `code`). Ari's practice run is the real check.
+- In a hidden or background tab, Chromium throttles `requestVideoFrameCallback` to ~1 Hz, so the time readout lags there. In a visible tab it's per frame.
+- The practice queue is a timing test. Its rows aren't ground truth and stay out of `labels/events.csv`. The real train fouls come back through the mined queue in 2.2.
+- Event ids are max + 1 per file. Labeling on two machines without pulling first would collide (the CLI reminds you).
+
+**Next:**
+- Ari: `uv run deepfoul label`, label the 30 practice moments with a timer (the header shows "this session: N saved in m:ss"), and note anything slow or annoying.
+- Then section 2.2 (stoppage finder).
 
 ### 2026-11-21 · Section 1.5 · Overlay renderer v1 + benchmark
 **Built:**
