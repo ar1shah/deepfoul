@@ -12,8 +12,8 @@ Claude Code updates this file at the end of every ROADMAP section. Newest entrie
 | 1 | 1.3 Identity: ref filter and red/blue | Done (stand-up and cuts correct; golden_04 clinch partly wrong, see log) |
 | 1 | 1.4 Pose extraction and caching | Done (all 13 non-test fights cached, 11h15m overnight) |
 | 1 | 1.5 Overlay renderer v1 + benchmark | Done (golden renders with skeletons, 10.2 fps full pass) |
-| 2 | 2.1 Labeling app | Done (practice queue + full-fight mode; Ari's timed 30-moment run pending) |
-| 2 | 2.2 Stoppage finder | Not started |
+| 2 | 2.1 Labeling app | Done (practice run: 30 moments in ~13:00) |
+| 2 | 2.2 Stoppage finder | Done (train known fouls in top 20: 7/8; val 3/6, held out) |
 | 2 | 2.3 Dataset builder | Not started |
 | 3 | 3.1 Evaluation harness | Not started |
 | 3 | 3.2 Feature layer | Not started |
@@ -45,7 +45,8 @@ Claude Code updates this file at the end of every ROADMAP section. Newest entrie
   - The 13 non-test fights (405k processed frames) take **~11 h** of extract (measured: 11h15m).
 - Shot detection (CPU decode): ~190 fps at 1080p30, ~110 fps at 60 fps. All 9 train fights: ~38 min.
 - Labeled positives: eye_poke - / low_blow - / open_hand -
-- Labeling app (2.1): seek 15-475 ms on H.264 / VP9 / AV1 in Chromium, item switch ≤ 0.8 s, browser frame = original-file frame on 6/6 checks
+- Labeling app (2.1): seek 15-475 ms on H.264 / VP9 / AV1 in Chromium, item switch ≤ 0.8 s, browser frame = original-file frame on 6/6 checks. Practice run: 30 moments in ~13:00 (26 s each)
+- Stoppage finder (2.2): known fouls in their fight's top 20, train 7/8 (untuned 3/8), val 3/6 (held out). `mined.csv` 181 items (~60 min of labeling). `mine --all --check` ~5 min for 13 fights
 - Fights: train 9 / val 4 / test 2 (8 foul, 5 clean, 2 test). Known fouls: 16 (`labels/notes/known_fouls.csv`)
 - Val fights: Cortes Acosta-Delija, Kape-Silva, Gaethje-Holloway, Garry-Prates (6 known fouls). Kape-Silva and Garbrandt-Long swapped splits after 0.2, because Garbrandt-Long's video is cropped and likely frame-interpolated.
 - Best val metrics: -
@@ -71,6 +72,7 @@ Claude Code updates this file at the end of every ROADMAP section. Newest entrie
 - Shot detection misses **dissolves** (gradual transitions). They only showed up in between-round segments (Garbrandt 12:16-13:36, Holland 20:13-21:13), which 4.2 skips.
 - Slow-motion replays can fire bursts of fake cuts (Battle-Loosa 09:40-09:43, 4 shots under 1 s). Replays are tagged in 4.2.
 - Jandiroba-Dern has a sponsor overlay (bottom right) burned into the official UFC upload.
+- **Magomedov-Petrosyan may have unlisted fouls** (2.2 contact sheets: red timeout clocks around 06:20-06:55 and 09:14-09:42). It's listed as clean in `labels/notes/`; the mined queue covers both, so Ari's labels settle it.
 - No Gane-Hokit (UFC 334) row yet; add it once a video exists. No truly similar-shorts fight yet (Barber-Grasso grey vs black is the stand-in); a data-round task.
 
 ## Switching machines (later, not now)
@@ -120,6 +122,127 @@ Per fight, b/m of visible is 78-96%, median 90.
 - **Velocity features (3.2):** must use real `t` deltas (Garbrandt-Long's duplicate frames).
 
 ## Log
+
+### 2026-11-21 · Section 2.2 · Stoppage finder
+**Practice run (2.1, Ari):** 30 moments in about 13:00 on the Mac in Chrome (26 s each, target 20 s). No lag, and the key list was good. The arrow steps were too big, and scrubbing could leave the clip.
+
+**Built:**
+- **`mining/signals.py`:** signals on a 0.25 s grid from the keypoint cache. Each one looks at most `lookahead_s` (2 s) ahead; the past is free. Geometry is in torso lengths, and motion is hip-relative body keypoints moved per 0.25 s bin within one tracklet (camera pans don't count, Garbrandt's duplicate frames don't read as stopped, nothing is compared across a cut).
+  - **guard (the one that works):** every fighter's nearest hand comes away from the head (min hand-to-head over fighter boxes > `guard_down` 0.9) after a guard up (< `guard_up` 0.5) over the last `guard_before_s` 10 s. When the ref steps in, both fighters drop their hands: hand-to-head jumps from ~0.3 to over 1.0 at every known stoppage.
+  - **pause:** median fighter motion over `[t-3, t)` vs the lookahead. Bins with no fighter are skipped, so across a cut the "after" side is the new shot's motion (Ari's change 3).
+  - **ref** (speed vs the fighters' midpoint), **eye / groin** (one track holds a hand on its own head / groin for 0.75 s), **bend** (bent over and still), **closeup** (both corners not in frame).
+- **`mining/miner.py`:**
+  - The score is a weighted sum. Peaks are at least `min_gap_s` (10 s) apart, and the queue time = peak - `onset_back_s` (3.0 s), because hands drop ~3 s after the foul (train median 3.25 s), so the foul sits mid-clip.
+  - `reason` = the strongest signal names at the peak, no numbers (Ari's change 7).
+  - `data/queues/mined_<fid>.csv` is ranked, top 20. `mined.csv` = every train fight's file, by fight then time, plus an **`extra`** item at `live_s` for each train known foul the top 20 doesn't cover (Ari's change 2). It's rebuilt from the per-fight files, so re-mining one fight keeps the others. Item ids are `<fid>_<centiseconds>` (stable).
+- **`deepfoul mine <ids> | --all [--check] [--no-sheets]`:**
+  - `--all` = train fights. `--check` scores the val fights in memory for the recall check: never queued, never tuned on. Test fights are refused.
+  - `outputs/mining/report.md`: known-foul ranks untuned vs tuned, per fight and per split; queue size; each fight's top 20.
+  - `<fid>_signals.png`: signals over the fight, known fouls in red.
+  - `<fid>_top.jpg`: the top 20 at their peak frame.
+  - It takes ~5 min for 13 fights, most of it ffmpeg seeks for the sheets.
+- **Labeling app fixes:**
+  - **Steps:** ←/→ 0.5 s, Shift 2 s (`labeling.scrub_s` / `scrub_big_s`). `,` `.` are still one frame.
+  - **Clamping:** every seek (arrows, frame steps, timeline clicks, event loads) clamps to the clip in queue mode and to the fight window in full-fight mode.
+  - **`W` widens** the clip by `widen_s` 4 s on each side and can be pressed again. The original clip shows as a band on the timeline, with a "widened +N s each side" tag. It's stored per item in `data/queues/<name>.widen.json` (local, like skips).
+  - **Done rule:** an event closes only the **nearest** item of its fight among those whose window (plus that item's widening) it overlaps. A label in a widened area closes that item, and never the neighbor too.
+  - **Quick reasons:** `6` cut, `7` ref warning, `8` slip, `9` glove touch, `Shift+6` round break, `Shift+7` other. Each sets clean + offender none + contact no + that note, so `Enter` saves. They're also buttons in the panel and fixed strings from `labeling.clean_reasons` (Ari's change 6).
+  - **`0` = replay:** skips the item with reason `replay`, stored in `<name>.skips.json` (now `{item_id: reason}`, still reads the 2.1 list). Nothing goes to events.csv, so a replay of a real foul never becomes a clean label (Ari's change 1).
+  - **Header:** the item counter shows the mined reason (signal names). It's hidden for the practice queue, whose reasons would give its answers away.
+  - **Playback:** the rate is kept across fights (a new video used to reset it to 1x), and 1.5x was added.
+  - The key list says `Enter` moves on at once (no need to wait for the clip end).
+- **Tests:** 22 new (152 passed, 2 xfailed).
+  - `tests/test_mining.py`:
+    - pause on a motion drop, **high motion, a cut, then low motion = a high pause**
+    - duplicate frames still moving
+    - guard drop vs no guard before
+    - eye hold vs a normal guard, groin hold, bend, ref rush
+    - **changing everything after t + 2 s leaves the signals at t unchanged**
+    - peaks and the gap rule, queue time before the peak, names-only reasons
+    - the known-foul hit window, extras for misses only
+    - `mined.csv` train-only with extras, stable ids
+  - `tests/test_labeling.py`: the nearest-item rule (touching windows, widened labels, no cross-fight), skip reasons + the old list format, and the API (widen, done with widen, replay skip writes no event).
+- Deps: `matplotlib` (was already installed through another package, now declared).
+
+**Known-foul check** (`outputs/mining/report.md`; a hit = a top-20 clip window `[t-4, t+4]` contains `live_s`):
+
+| fight | foul | untuned rank | tuned rank |
+|---|---|---|---|
+| Garbrandt-Long | low blow 13:30 | miss | 5 |
+| Garbrandt-Long | low blow 14:40 | miss | 9 |
+| Garbrandt-Long | low blow 17:56 | miss | 12 |
+| Holland-Malott | low blow 05:02 | miss | 2 |
+| Holland-Malott | low blow 05:52 | miss | miss (queued as extra) |
+| Battle-Loosa | eye poke 08:09 | 15 | 3 |
+| Munhoz-O'Malley | eye poke 12:07 | 4 | 3 |
+| Edwards-Muhammad | eye poke 09:06 | 3 | 1 |
+| **train** | | **3/8** | **7/8** |
+| Cortes Acosta-Delija (val) | eye poke 03:29 | miss | miss |
+| Kape-Silva (val) | low blow 02:45 | miss | 5 |
+| Kape-Silva (val) | low blow 07:54 | miss | 2 |
+| Kape-Silva (val) | eye poke 13:33 | miss | miss (no pause at all) |
+| Gaethje-Holloway (val) | eye poke 07:10 | miss | miss |
+| Gaethje-Holloway (val) | eye poke 09:38 | 1 | 6 |
+| **val (held out)** | | **1/6** | **3/6** |
+
+- Without Garbrandt-Long (3 of the 8): train 4/5 tuned.
+- Holland's second low blow (05:52) comes 50 s after the first one's timeout, so there's no 10 s of guard-up history before it.
+
+**Top-20 review by eye** (contact sheets, train). The broadcast clock is in every tile: a red `+m:ss` clock = a foul timeout, corner split screens or a `0:00` clock = between rounds.
+
+| fight | between rounds | in a foul timeout | live action / other |
+|---|---|---|---|
+| Garbrandt-Long | 1-2 | ~9 | ~9 |
+| Holland-Malott | 7 | 5 | 8 |
+| Battle-Loosa | 0 | ~6 | ~14 |
+| Munhoz-O'Malley | 3 | ~6 | ~11 |
+| Edwards-Muhammad | 1 | ~3 | ~16 |
+| Magomedov-Petrosyan | 0 | ~4 | ~16 |
+| Jandiroba-Dern, Barber-Grasso, O'Malley-Vera | 0 | 0 | 20 each |
+
+About 12 of 180 are between rounds, mostly Holland's. That's not enough to need a round-break filter yet (Ari's change 5).
+
+**Decisions:**
+- **Guard drop is the main signal; the plan's signals only name the reason.**
+  - Untuned (all 7 signals at weight 1, 3 s guard history, queue time = peak - 0.5 s): train 3/8.
+  - The first versions of eye/groin used the closest hand over both fighters and fired ~40% / 26% of the time, because a normal guard keeps gloves at the face. They're now per-track holds with tight radii.
+  - A weight grid (guard 1, every other signal 0 / 0.25 / 0.5) found no combination that beat guard alone on train, so the tuned set is: weights (guard only) + `guard_before_s` 10 + `onset_back_s` 3.0. `guard_down` 0.9 / `guard_up` 0.5 were set from the hand-to-head distribution (p90 / about p60) and left alone.
+  - Some combinations scored 4/6 on val, but picking one for that would be tuning on val, so I didn't.
+- **Merged boxes stay in the guard signal.** Dropping them (a merged box has one skeleton for two people) cost a train foul (7 -> 6/8), so it was reverted.
+  - So clinches with hands off the head show up as candidates in clean fights (Barber-Grasso, Jandiroba-Dern). They're quick clean labels and useful negatives.
+- **The "long break" proxy was dropped:** "no guard up for 60 s after" flagged 1 item out of 180, because round breaks have close-ups with hands near the face. The by-eye count above replaces it.
+- **The miner reads only the cache** (no video), so `mine` runs on any machine with `data/keypoints/` and is part of 2.3's `ingest`.
+
+**For 2.3 (dataset builder):** clean events whose note is a stoppage reason (`cut`, `ref warning`, `slip`, `glove touch`) can be used as **hard negatives**; `round break` and `other` can't. Items skipped as `replay` have no event, so they never become negatives.
+
+**Verified:**
+- `uv run deepfoul mine --all --check`: 9 train fights queued (20 each), 4 val fights scored and not queued, `mined.csv` 181 items (1 extra: Holland 05:52), ~60 min of labeling at 20 s each.
+- **Contact sheets** checked by eye for all 9 train fights (table above).
+- **Labeling app in the built-in browser** on the real `mined` queue, writing to a scratch events file. Real key presses:
+  - ← stepped 0.5 s and stopped at the clip start (160.0), → 0.5 s, Shift+→ 2 s, and five Shift+→ stopped at the clip end (168.0). `.` at the end stayed at 168.0.
+  - `W` widened the clip to 156-172 with the band and tag showing. A clean label at 156.0-157.6 (outside the original clip) with `6` (note "cut") + `Enter` saved, moved to the next item, and closed item 1 while item 2 stayed todo.
+  - `0` skipped item 2 as `replay` with no event written.
+  - `Shift+6` / `Shift+7` set clean + "round break" / "other", and the button lights up.
+  - With synthetic keys (the tool can't send `=`): 1.5x stayed 1.5x after switching from a Garbrandt item to a Holland item.
+  - **Full-fight mode** on Kape-Silva (val): Shift+← from 12 s stopped at the window start (10), → past the end stopped at 928, and the replay/skip buttons are hidden.
+  - After the checks: the scratch events file, `mined.skips.json` and `mined.widen.json` were deleted, and `git diff labels/events.csv` is clean.
+- `uv run pytest`: 152 passed, 2 xfailed. `git status`: nothing under `data/` or `outputs/`.
+
+**Golden set:** n/a (no perception change).
+
+**Known issues:**
+- **Magomedov-Petrosyan is listed as clean,** but its top 20 has red timeout clocks around 06:20-06:55 (Petrosyan bent over at 06:20) and 09:14-09:42. These are probably unlisted fouls. They're in the queue, so label what you see there.
+- **Holland 05:52 is a miss** (back-to-back fouls); it's in the queue as an `extra` item. Back-to-back fouls will be missed in general, because the guard history is still "down" from the first timeout.
+- **The val misses:**
+  - Kape 13:33 had no pause at all, so a stoppage finder can't find it.
+  - Cortes Acosta 03:29 and Gaethje 07:10 were "hard to see live". Their stoppages start late or slowly (the nearest candidate is 6 s off). Full-fight labeling of val (3.0) covers these anyway.
+- **Clinch candidates in clean fights:** a merged box's one skeleton has its hands off the head, which looks like a guard drop. They're quick clean labels (and negatives). This is a 4.1 item if it matters (the same merged-box blind spot).
+- **Real-key check of `=`:** the browser tool can't send `=`, so the speed key in your run is the real test (`-` / `=` worked for you in the practice run).
+
+**Next:**
+- Ari: label the mined queue (ROADMAP Now, "Before the kickoff").
+- Then section 2.3 (dataset builder + ingest).
+
 
 ### 2026-11-21 · Section 2.1 · Labeling app
 **Built:**

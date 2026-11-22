@@ -1,37 +1,40 @@
 # DeepFoul Roadmap
 
-## ▶ Now: 2.2 Stoppage finder
+## ▶ Now: 2.3 Dataset builder + ingest
 
-**Before the kickoff (you, left over from 2.1)**
-1. Run `uv run deepfoul label` and label the 30 practice moments with a timer. The header shows "this session: N saved in m:ss". Use Chrome or Edge (the videos are VP9 / AV1 with Opus audio). These labels go to `outputs/label_practice/events.csv`, not `labels/events.csv`.
-2. Write down everything slow or annoying (missing shortcuts, clip too short, video loads slowly). In particular, check that `[` `]` `,` `.` `-` `=` work on your keyboard, since Claude Code could only test them with synthetic key events.
-3. If the list is long, paste it into a quick fix session before 2.2. Otherwise paste it into the kickoff prompt below.
+**Before the kickoff (you, left over from 2.2)**
+1. `git pull`, then `uv run deepfoul label --queue mined` and label all 181 candidates. That's about 60 min at 20 s each, so splitting it over a few sittings is fine: done items stay done.
+   - **Real fouls:** `1` eye poke or `2` low blow, plus the offender corner (`R`/`B`) and contact (`C`).
+   - **Stoppages for other reasons:** one key sets clean + the note: `6` cut, `7` ref warning, `8` slip, `9` glove touch, `Shift+6` round break, `Shift+7` other. Then `Enter`.
+   - **A broadcast replay:** `0` (it skips the item, so a replay is never saved as clean).
+   - **Live action with no stoppage:** `5` clean, then `Enter`.
+   - **Real moment just outside the clip:** `W` widens the clip by 4 s on each side (press it again for more). ←/→ step 0.5 s and Shift+←/→ 2 s. Scrubbing stops at the clip edges.
+   - `Enter` saves and moves on right away; there's no need to wait for the clip to end.
+   - **Magomedov-Petrosyan** is listed as clean, but the miner found timeouts around 06:20 and 09:20. Label whatever you see there.
+2. Don't label val or test fights from the queue (the queue has train fights only).
+3. Commit and push `labels/events.csv`. Put the count of fouls you found (and any fouls you saw outside the queue, as `fight_id mm:ss type offender`) in the kickoff prompt.
 
 **Kickoff prompt**
 ```
-Read CLAUDE.md, ROADMAP.md and PROGRESS.md. Plan section 2.2 only. Wait for my approval before writing code.
-Practice run: <N> moments in <m:ss>. Labeling app fixes: <list, or "none">.
+Read CLAUDE.md, ROADMAP.md and PROGRESS.md. Plan section 2.3 only. Wait for my approval before writing code.
+Mined queue: <N> labeled (<eye pokes> / <low blows> / <clean>), took <m:ss>. Fouls seen outside the queue: <list, or "none">.
 ```
 
 **Claude Code does**
-1. Scans cached keypoints for candidate foul moments, using signals that don't need a foul model:
-   - The ref moves quickly between or toward the fighters
-   - Both fighters' motion drops sharply (action paused)
-   - A fighter's hand goes to his own eye or groin region and stays there
-   - A fighter bends over at the waist
-2. Scores each moment and builds a ranked queue per fight (`deepfoul mine <fight_id>`, `deepfoul mine --all`). Queues use the 2.1 format, `data/queues/<name>.csv` (`item_id, fight_id, t_s, score, reason`), with items at least `labeling.min_gap_s` (10 s) apart so one label can't close two items.
-3. Runs `mine --all` on every extracted train fight.
-4. Checks the known fouls from `labels/notes/starter_fights.md` and reports how many land in the top 20 per fight.
-5. Applies any labeling app fixes from the practice run.
+1. `deepfoul build-dataset`: turns `events.csv` + cached keypoints into training windows (default 2 s, configurable stride).
+   - Positives come from labeled fouls.
+   - Negatives are sampled from clean time, with extra weight on hard negatives.
+   - Clean events whose note is a stoppage reason (`cut`, `ref warning`, `slip`, `glove touch`) count as hard negatives; `round break` and `other` don't (see PROGRESS 2.2).
+2. Splits by fight from `fights.csv`, and refuses to put a test fight in train or val (unit tested).
+3. Writes a summary report: counts per class per split.
+4. `deepfoul ingest`: one command for new fights (merge a Cowork draft CSV if present, then fetch -> extract -> `mine`), writing an ingest report. `mine` rebuilds `mined.csv` from the per-fight files, so new train fights join the queue.
+5. A hard-negative candidate queue: moments where a closed fist or kick lands near a foul zone with no stoppage afterward (`--queue hardneg`).
 
 **Done when**
-- Most known fouls appear in their fight's top 20 candidates.
+- `build-dataset` produces the dataset and the summary, and the split test passes.
 
 **You do**
-1. Run `uv run deepfoul label --queue mined` and label every candidate (`git pull` first, then commit and push `labels/events.csv` after):
-   - Real fouls: `1` eye poke or `2` low blow, plus the offender corner (`R`/`B`) and contact (`C`).
-   - Stoppages for other reasons (a cut, a ref warning, a slip, a glove touch): `5` clean, with a short note (`N`). These also work as hard negatives.
-2. Don't label val or test fights from the queue. They get full-fight labeling later.
+- Start the data rounds below.
 
 ---
 
@@ -107,24 +110,7 @@ Done (see the **Done** list).
 
 ## Phase 2: Data engine
 
-2.1 is done. 2.2 is in progress (see **Now** at the top).
-
-### 2.3 Dataset builder + ingest
-
-**Kickoff prompt**: standard.
-
-**Claude Code does**
-1. `deepfoul build-dataset`: turns `events.csv` + cached keypoints into training windows (default 2 s, configurable stride). Positives come from labeled fouls; negatives are sampled from clean time, with extra weight on hard negatives.
-2. Splits by fight from `fights.csv`, and refuses to put a test fight in train or val (unit tested).
-3. Writes a summary report: counts per class per split.
-4. `deepfoul ingest`: one command for new fights (merge a Cowork draft CSV if present, then fetch -> extract -> mine), writing an ingest report.
-5. A hard-negative candidate queue: moments where a closed fist or kick lands near a foul zone with no stoppage afterward (`--queue hardneg`).
-
-**Done when**
-- `build-dataset` produces the dataset and the summary, and the split test passes.
-
-**You do**
-- Start the data rounds below.
+2.1 and 2.2 are done. 2.3 is in progress (see **Now** at the top).
 
 ### Data rounds (repeat through Phases 2 to 4)
 
@@ -147,6 +133,7 @@ Targets before Phase 5:
    - `uv run deepfoul label --queue mined`
    - `uv run deepfoul label --queue hardneg`
    - For compilations: `M` on slow-motion clips, and skip any Gane segment (leakage rule).
+   - Full fights: `0` on a broadcast replay (never saved as clean).
 5. **Claude Code** (same short session or the next one): `uv run deepfoul build-dataset`, then report the counts.
 
 **Send to chat:** the dataset summary once you hit about 50 positives per foul, and again before Phase 5.
@@ -412,7 +399,10 @@ Shorts colors for all 15 fights (`shorts-check`), RTMW pose once per kept box in
 `deepfoul render` draws boxes, corner tags and optional skeletons from the keypoint cache: no GPU, `--speed 0.25`, `--sheet merged|single` contact sheets. `render --golden` renders to `outputs/renders/1.5/`. `deepfoul bench`: full extract pass 10.2 fps on the RTX 2080 (3.1 GB VRAM). The extract report now flags b/m of visible < 82% and visible < 88%. The three low fights are long foul stoppages and close-ups; sticky merges and the other identity misses go to 4.1.
 
 ### 2.1 Labeling app ✅
-`deepfoul label`: a local FastAPI app + one plain HTML/JS page that streams the raw video with Range requests (Chrome/Edge; VP9/AV1/Opus), with queue mode (`data/queues/<name>.csv`, clip `t ± 4 s`) and full-fight mode (`--fight`), keyboard labeling and every save fsynced to `events.csv`. Practice queue of 30 train moments writes to `outputs/label_practice/`. Seeks under 0.5 s on all codecs; the browser frame matches the original-file frame. Ari's timed practice run is pending (see Now).
+`deepfoul label`: a local FastAPI app + one plain HTML/JS page that streams the raw video with Range requests (Chrome/Edge; VP9/AV1/Opus), with queue mode (`data/queues/<name>.csv`, clip `t ± 4 s`) and full-fight mode (`--fight`), keyboard labeling and every save fsynced to `events.csv`. Practice queue of 30 train moments writes to `outputs/label_practice/`. Seeks under 0.5 s on all codecs; the browser frame matches the original-file frame. Ari's practice run: 30 moments in ~13:00.
+
+### 2.2 Stoppage finder ✅
+`deepfoul mine` ranks candidate foul moments from the keypoint cache. The signal that works is a **guard drop**: both fighters' hands come away from their heads after 10 s with a guard up, at the queue time + 3 s. Train known fouls in their top 20: 7/8 (untuned 3/8), val 3/6 held out. `mined.csv` = 20 per train fight + an `extra` item for each missed known foul (181 items). Labeling app: 0.5 / 2 s steps clamped to the clip, `W` widens, quick clean-reason keys `6`-`9` and `Shift+6`/`Shift+7`, `0` = replay skip, the rate is kept across fights.
 
 ---
 
