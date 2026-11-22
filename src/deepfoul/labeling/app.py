@@ -16,14 +16,15 @@ from fastapi.staticfiles import StaticFiles
 from deepfoul.io.fetch import read_fights
 from deepfoul.io.fights import window
 from deepfoul.labeling.events_store import (EventStore, default_source, validate_event)
-from deepfoul.labeling.queues import Skips, item_done
+from deepfoul.labeling.queues import LocalMap, Skips, done_items
 
 STATIC = Path(__file__).parent / "static"
 
 
 def create_app(cfg: dict, events_path: Path, mode: str, queue: list[dict] | None = None,
                queue_name: str | None = None, fight_id: str | None = None,
-               skips_path: Path | None = None, warm_probe: bool = True) -> FastAPI:
+               skips_path: Path | None = None, widen_path: Path | None = None,
+               warm_probe: bool = True) -> FastAPI:
     """mode 'queue' (queue + queue_name) or 'fight' (fight_id)."""
     lab = cfg["labeling"]
     fights = {f["fight_id"].strip(): f for f in read_fights(cfg["paths"]["labels"] / "fights.csv")}
@@ -31,6 +32,7 @@ def create_app(cfg: dict, events_path: Path, mode: str, queue: list[dict] | None
     raw = cfg["paths"]["raw"]
     store = EventStore(events_path)
     skips = Skips(skips_path) if skips_path else None
+    widen = LocalMap(widen_path) if widen_path else None
     queue = queue or []
     app = FastAPI(title="DeepFoul labeling", docs_url=None, redoc_url=None)
 
@@ -63,12 +65,16 @@ def create_app(cfg: dict, events_path: Path, mode: str, queue: list[dict] | None
                 "window": [w0, w1], "has_video": (raw / f"{fid}.mp4").is_file()}
 
     def items_with_status() -> list[dict]:
-        events = store.list()
+        wid = widen.data if widen else {}
+        done = done_items(queue, store.list(), lab["pad_before_s"], lab["pad_after_s"],
+                          lab["widen_s"], wid)
         out = []
         for it in queue:
-            status = ("done" if item_done(it, events, lab["pad_before_s"], lab["pad_after_s"])
-                      else "skipped" if skips and it["item_id"] in skips.ids else "todo")
-            out.append({**it, "status": status})
+            iid = it["item_id"]
+            status = ("done" if iid in done
+                      else "skipped" if skips and iid in skips.ids else "todo")
+            out.append({**it, "status": status, "widen": int(wid.get(iid, 0)),
+                        "skip_reason": skips.data.get(iid, "") if skips else ""})
         return out
 
     @app.get("/")
@@ -81,7 +87,9 @@ def create_app(cfg: dict, events_path: Path, mode: str, queue: list[dict] | None
         return {"mode": mode, "queue_name": queue_name, "fight_id": fight_id,
                 "events_path": str(events_path), "items": items_with_status(),
                 "fights": {fid: fight_info(fid) for fid in ids if fid in fights},
-                "config": {k: lab[k] for k in ("pad_before_s", "pad_after_s", "default_event_pad_s")}}
+                "config": {k: lab[k] for k in ("pad_before_s", "pad_after_s", "default_event_pad_s",
+                                               "scrub_s", "scrub_big_s", "widen_s",
+                                               "clean_reasons", "replay_skip_reason")}}
 
     @app.get("/api/fight/{fid}")
     def fight(fid: str) -> dict:
@@ -128,8 +136,22 @@ def create_app(cfg: dict, events_path: Path, mode: str, queue: list[dict] | None
     def skip(item_id: str, body: dict = Body(default={})) -> dict:
         if skips is None or item_id not in {it["item_id"] for it in queue}:
             raise HTTPException(404, f"no queue item {item_id}")
-        skips.set(item_id, bool(body.get("skipped", True)))
-        return {"item_id": item_id, "skipped": item_id in skips.ids}
+        skips.set(item_id, bool(body.get("skipped", True)), str(body.get("reason", "")))
+        return {"item_id": item_id, "skipped": item_id in skips.ids,
+                "reason": skips.data.get(item_id, "")}
+
+    @app.post("/api/widen/{item_id}")
+    def set_widen(item_id: str, body: dict = Body(default={})) -> dict:
+        if widen is None or item_id not in {it["item_id"] for it in queue}:
+            raise HTTPException(404, f"no queue item {item_id}")
+        n = int(body.get("n", 0))
+        if n < 0:
+            raise HTTPException(422, "n must be >= 0")
+        if n:
+            widen.put(item_id, n)
+        else:
+            widen.drop(item_id)
+        return {"item_id": item_id, "widen": n}
 
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
 

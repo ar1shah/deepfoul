@@ -1012,7 +1012,7 @@ def label(
     if queue and fight:
         raise typer.BadParameter("give --queue or --fight, not both")
     fights = {f["fight_id"].strip(): f for f in read_fights(labels / "fights.csv")}
-    items, skips_path = None, None
+    items, skips_path, widen_path = None, None, None
     if fight:
         if fight not in fights:
             raise typer.BadParameter(f"unknown fight_id {fight!r}")
@@ -1039,6 +1039,7 @@ def label(
                 raise typer.BadParameter(f"no queue file {qpath}")
         items = load_queue(qpath)
         skips_path = qpath.with_suffix(".skips.json")
+        widen_path = qpath.with_suffix(".widen.json")
         mode = "queue"
     events_path = (events if events else default_events).resolve()
     if events_path == (labels / "events.csv").resolve():
@@ -1049,7 +1050,7 @@ def label(
     typer.echo(f"{mode}: {queue or fight} -> {events_path}")
     typer.echo(f"open {url} in Chrome or Edge (Ctrl+C stops)")
     app_ = create_app(cfg, events_path, mode, queue=items, queue_name=queue, fight_id=fight,
-                      skips_path=skips_path)
+                      skips_path=skips_path, widen_path=widen_path)
     if not no_browser:
         import threading
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()

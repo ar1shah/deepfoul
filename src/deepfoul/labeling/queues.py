@@ -1,8 +1,9 @@
 """Label queues: data/queues/<name>.csv (item_id, fight_id, t_s, score, reason).
 
-2.2 (mined) and 2.3 (hardneg) write the same format. An item is done when any event of the same
-fight overlaps its clip window, so status needs no local state and carries across machines.
-Skips are local (data/queues/<name>.skips.json).
+2.2 (mined) and 2.3 (hardneg) write the same format. An event closes the nearest item of its
+fight whose clip window (plus that item's widening) it overlaps, so status comes from the events
+file and carries across machines. Skips (with a reason, e.g. "replay") and widenings are local,
+like the queue files themselves: data/queues/<name>.skips.json and <name>.widen.json.
 """
 
 from __future__ import annotations
@@ -113,24 +114,82 @@ def build_practice_queue(fights: list[dict[str, str]], golden: list[dict[str, st
     return items[:n]
 
 
+def clip_window(item: dict, pad_before: float, pad_after: float, widen_s: float = 0.0,
+                widen_n: int = 0) -> tuple[float, float]:
+    return (item["t_s"] - pad_before - widen_n * widen_s,
+            item["t_s"] + pad_after + widen_n * widen_s)
+
+
 def item_done(item: dict, events: list[dict[str, str]], pad_before: float, pad_after: float) -> bool:
-    """Any event of the same fight overlaps the item's clip window."""
-    a, b = item["t_s"] - pad_before, item["t_s"] + pad_after
+    """Any event of the same fight overlaps the item's clip window (one item on its own)."""
+    a, b = clip_window(item, pad_before, pad_after)
     return any(e["fight_id"] == item["fight_id"] and float(e["start_s"]) <= b
                and float(e["end_s"]) >= a for e in events)
 
 
-class Skips:
+def done_items(items: list[dict], events: list[dict[str, str]], pad_before: float,
+               pad_after: float, widen_s: float = 0.0, widen: dict | None = None) -> set[str]:
+    """item_ids closed by the events. Each event closes only the nearest item of its fight
+    (distance from the item's time to the event span) among those whose clip window, plus the
+    item's widening, it overlaps. One label never closes two items, and a label placed in a
+    widened area closes the item that was widened."""
+    widen = widen or {}
+    by_fight: dict[str, list[dict]] = {}
+    for it in items:
+        by_fight.setdefault(it["fight_id"], []).append(it)
+    done: set[str] = set()
+    for e in events:
+        s, t = float(e["start_s"]), float(e["end_s"])
+        best = None
+        for it in by_fight.get(e["fight_id"], []):
+            a, b = clip_window(it, pad_before, pad_after, widen_s,
+                               int(widen.get(it["item_id"], 0)))
+            if s > b or t < a:
+                continue
+            d = max(s - it["t_s"], it["t_s"] - t, 0.0)
+            if best is None or d < best[0]:
+                best = (d, it["item_id"])
+        if best:
+            done.add(best[1])
+    return done
+
+
+class LocalMap:
+    """A small JSON object file, written atomically."""
+
     def __init__(self, path: Path):
         self.path = path
         try:
-            self.ids = set(json.loads(path.read_text(encoding="utf-8")))
+            data = json.loads(path.read_text(encoding="utf-8"))
         except (FileNotFoundError, ValueError):
-            self.ids = set()
+            data = {}
+        self.data = {k: "" for k in data} if isinstance(data, list) else dict(data)
 
-    def set(self, item_id: str, skipped: bool = True) -> None:
-        (self.ids.add if skipped else self.ids.discard)(item_id)
+    def put(self, key: str, value) -> None:
+        self.data[key] = value
+        self._write()
+
+    def drop(self, key: str) -> None:
+        self.data.pop(key, None)
+        self._write()
+
+    def _write(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(sorted(self.ids)), encoding="utf-8")
+        tmp.write_text(json.dumps(dict(sorted(self.data.items()))), encoding="utf-8")
         tmp.replace(self.path)
+
+
+class Skips(LocalMap):
+    """item_id -> skip reason ("" = a plain skip, "replay" = a broadcast replay). Reads the 2.1
+    list format too."""
+
+    @property
+    def ids(self) -> set[str]:
+        return set(self.data)
+
+    def set(self, item_id: str, skipped: bool = True, reason: str = "") -> None:
+        if skipped:
+            self.put(item_id, reason)
+        else:
+            self.drop(item_id)

@@ -4,7 +4,7 @@
 const $ = (id) => document.getElementById(id);
 const video = $("video");
 const preloadEl = $("preload");
-const RATES = [0.25, 0.5, 1, 2];
+const RATES = [0.25, 0.5, 1, 1.5, 2];
 const FOUL_KEYS = { "1": "eye_poke", "2": "low_blow", "3": "open_hand", "4": "hard_negative", "5": "clean" };
 const NAMES = { eye_poke: "eye poke", low_blow: "low blow", open_hand: "open hand",
                 hard_negative: "hard negative", clean: "clean" };
@@ -74,6 +74,7 @@ async function loadFight(fid) {
     video.addEventListener("error", resolve, { once: true });
     video.src = `/video/${fid}`;
   });
+  video.playbackRate = RATES[S.rateIdx];   // a new src resets the rate; keep the labeler's
   await refreshEvents();
 }
 
@@ -93,8 +94,15 @@ async function refreshEvents() {
   renderTimeline();
 }
 
+function bounds() {
+  const dur = video.duration || Infinity;
+  if (S.clipStart != null) return [Math.max(0, S.clipStart), Math.min(dur, S.clipEnd)];
+  const w = (S.fight && S.fight.window) || [];
+  return [Math.max(0, w[0] != null ? w[0] : 0), Math.min(dur, w[1] != null ? w[1] : Infinity)];
+}
+
 function seek(t) {
-  const [lo, hi] = [0, video.duration || Infinity];
+  const [lo, hi] = bounds();
   video.currentTime = Math.min(Math.max(t, lo), hi);
   S.t = video.currentTime;       // until the next presented frame reports mediaTime
   S.stoppedAtEnd = S.clipEnd != null && S.t >= S.clipEnd;
@@ -116,14 +124,45 @@ async function gotoItem(i, { play = true } = {}) {
   const it = S.items[i];
   $("item-reason").textContent = `· loading item ${i + 1}…`;
   try { await loadFight(it.fight_id); } finally { S.loading = false; }
-  S.clipStart = it.t_s - S.cfg.pad_before_s;
-  S.clipEnd = it.t_s + S.cfg.pad_after_s;
+  setClip(it);
   S.draft = blankDraft();
-  $("item-reason").textContent = `· item ${i + 1}/${S.items.length} at ${fmt(it.t_s)}`;
+  // the mined reason (signal names) says what to look for; the practice queue's would give
+  // its answers away, so it stays hidden there
+  const why = S.session.queue_name !== "practice" && it.reason ? ` · ${it.reason}` : "";
+  $("item-reason").textContent = `· item ${i + 1}/${S.items.length} at ${fmt(it.t_s)}${why}`;
   seek(S.clipStart);
   if (play) video.play().catch(() => {});
   preloadNext();
   renderAll();
+}
+
+function setClip(it) {
+  const extra = (it.widen || 0) * S.cfg.widen_s;
+  S.clipStart = it.t_s - S.cfg.pad_before_s - extra;
+  S.clipEnd = it.t_s + S.cfg.pad_after_s + extra;
+}
+
+async function widen() {
+  if (S.session.mode !== "queue" || S.idx < 0) return;
+  const it = S.items[S.idx];
+  const n = (it.widen || 0) + 1;
+  try { await api("POST", `/api/widen/${it.item_id}`, { n }); }
+  catch (e) { msg(`Not widened: ${e.message}`, "err"); return; }
+  it.widen = n;
+  setClip(it);
+  S.stoppedAtEnd = false;
+  renderTimeline();
+  msg(`Clip widened by ${n * S.cfg.widen_s} s on each side (W again for more).`, "ok");
+}
+
+function quickReason(i) {
+  const r = (S.cfg.clean_reasons || [])[i];
+  if (!r || !S.draft) return;
+  setFoul("clean");
+  S.draft.notes = r;
+  $("notes").value = r;
+  renderDraft();
+  msg(`clean · ${r}. Enter saves.`, "ok");
 }
 
 function preloadNext() {
@@ -244,12 +283,14 @@ async function undo() {
   msg(`Deleted ${ev.event_id}. Its values are back in the form; fix and press Enter.`, "warn");
 }
 
-async function skip() {
+async function skip(reason = "") {
   if (S.session.mode !== "queue" || S.idx < 0) return;
   const it = S.items[S.idx];
-  await api("POST", `/api/skip/${it.item_id}`, { skipped: true }).catch((e) => msg(e.message, "err"));
+  try { await api("POST", `/api/skip/${it.item_id}`, { skipped: true, reason }); }
+  catch (e) { msg(`Not skipped: ${e.message}`, "err"); return; }
   if (it.status === "todo") it.status = "skipped";
-  msg(`Skipped ${it.item_id}.`, "warn");
+  it.skip_reason = reason;
+  msg(`Skipped ${it.item_id}${reason ? ` (${reason})` : ""}.`, "warn");
   await gotoItem(nextTodo(S.idx));
 }
 
@@ -269,7 +310,7 @@ function step(frames) {
 }
 function setRate(delta) {
   S.rateIdx = Math.min(RATES.length - 1, Math.max(0, S.rateIdx + delta));
-  video.playbackRate = RATES[S.rateIdx];
+  video.playbackRate = video.defaultPlaybackRate = RATES[S.rateIdx];
   renderClock();
 }
 
@@ -310,6 +351,8 @@ function renderDraft() {
     box.querySelectorAll("button").forEach((b) => b.classList.toggle("on", d[f] === b.dataset.v));
   });
   if (document.activeElement !== $("notes")) $("notes").value = d.notes || "";
+  $("quick").querySelectorAll("button").forEach((b) => b.classList.toggle("on",
+    d.foul_type === "clean" && d.notes === (S.cfg.clean_reasons || [])[+b.dataset.i]));
   renderDraftSpan();
 }
 
@@ -328,10 +371,21 @@ function renderTimeline() {
     m.addEventListener("click", (evt) => { evt.stopPropagation(); loadEvent(ev); });
     marks.appendChild(m);
   }
-  const cand = $("tl-cand");
-  if (S.session.mode === "queue" && S.idx >= 0) {
-    cand.classList.remove("hidden"); cand.style.left = pct(S.items[S.idx].t_s);
+  const cand = $("tl-cand"), base = $("tl-base"), tag = $("tl-widen");
+  const it = S.session.mode === "queue" && S.idx >= 0 ? S.items[S.idx] : null;
+  if (it) {
+    cand.classList.remove("hidden"); cand.style.left = pct(it.t_s);
   } else cand.classList.add("hidden");
+  if (it && it.widen) {
+    const s0 = it.t_s - S.cfg.pad_before_s, s1 = it.t_s + S.cfg.pad_after_s;
+    base.classList.remove("hidden");
+    base.style.left = pct(s0);
+    base.style.width = `calc(${pct(s1)} - ${pct(s0)})`;
+    tag.textContent = `widened +${it.widen * S.cfg.widen_s} s each side`;
+  } else {
+    base.classList.add("hidden");
+    tag.textContent = "";
+  }
   $("tl-left").textContent = fmt(a);
   $("tl-right").textContent = fmt(b);
   renderClock();
@@ -357,8 +411,9 @@ function renderQueue() {
   ul.innerHTML = "";
   S.items.forEach((it, i) => {
     const li = document.createElement("li");
+    const why = it.status === "skipped" && it.skip_reason ? ` (${it.skip_reason})` : "";
     li.innerHTML = `<span class="st-${it.status}">${it.status === "done" ? "✓" : it.status === "skipped" ? "–" : "·"}` +
-                   ` ${it.item_id}</span> <span class="muted">${it.fight_id.split("_").slice(1).join("-")} ${fmt(it.t_s)}</span>`;
+                   ` ${it.item_id}</span> <span class="muted">${it.fight_id.split("_").slice(1).join("-")} ${fmt(it.t_s)}${why}</span>`;
     if (i === S.idx) li.classList.add("current");
     li.addEventListener("click", () => gotoItem(i));
     ul.appendChild(li);
@@ -394,7 +449,12 @@ document.querySelectorAll(".choices").forEach((box) => {
 });
 $("save-next").addEventListener("click", () => save(true));
 $("save-stay").addEventListener("click", () => save(false));
-$("skip").addEventListener("click", skip);
+$("skip").addEventListener("click", () => skip());
+$("skip-replay").addEventListener("click", () => skip(S.cfg.replay_skip_reason));
+$("quick").addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (b) quickReason(+b.dataset.i);
+});
 $("new-draft").addEventListener("click", () => { S.draft = blankDraft(); renderAll(); msg(""); });
 $("help-btn").addEventListener("click", () => $("help").classList.toggle("hidden"));
 $("help").addEventListener("click", () => $("help").classList.add("hidden"));
@@ -416,6 +476,10 @@ document.addEventListener("keydown", (e) => {
     return;
   }
   let handled = true;
+  // quick reasons by physical key: 6 7 8 9, Shift+6, Shift+7 (Shift+digit types ^ & on US)
+  const QUICK = e.shiftKey ? { Digit6: 4, Digit7: 5 } : { Digit6: 0, Digit7: 1, Digit8: 2, Digit9: 3 };
+  if (e.code in QUICK) { quickReason(QUICK[e.code]); e.preventDefault(); return; }
+  if (e.code === "Digit0" && !e.shiftKey) { skip(S.cfg.replay_skip_reason); e.preventDefault(); return; }
   if (FOUL_KEYS[k]) setFoul(FOUL_KEYS[k]);
   else if (k === "r" || k === "R") setOffender("red");
   else if (k === "b" || k === "B") setOffender("blue");
@@ -425,8 +489,9 @@ document.addEventListener("keydown", (e) => {
   else if (k === "[") setStart();
   else if (k === "]") setEnd();
   else if (k === " ") togglePlay();
-  else if (k === "ArrowLeft") seek(S.t - (e.shiftKey ? 5 : 1));
-  else if (k === "ArrowRight") seek(S.t + (e.shiftKey ? 5 : 1));
+  else if (k === "ArrowLeft") seek(S.t - (e.shiftKey ? S.cfg.scrub_big_s : S.cfg.scrub_s));
+  else if (k === "ArrowRight") seek(S.t + (e.shiftKey ? S.cfg.scrub_big_s : S.cfg.scrub_s));
+  else if (k === "w" || k === "W") widen();
   else if (k === ",") step(-1);
   else if (k === ".") step(1);
   else if (k === "-") setRate(-1);
@@ -453,6 +518,18 @@ async function start() {
   S.cfg = S.session.config;
   S.items = S.session.items;
   $("events-path").textContent = S.session.events_path;
+  const QK = ["6", "7", "8", "9", "⇧6", "⇧7"];
+  $("quick").innerHTML = (S.cfg.clean_reasons || []).slice(0, QK.length)
+    .map((r, i) => `<button data-i="${i}"><kbd>${QK[i]}</kbd> ${r}</button>`).join("");
+  $("help-quick").textContent = (S.cfg.clean_reasons || []).slice(0, QK.length)
+    .map((r, i) => `${QK[i]} ${r}`).join(", ");
+  $("help-scrub").textContent = `${S.cfg.scrub_s} s`;
+  $("help-scrub-big").textContent = `${S.cfg.scrub_big_s} s`;
+  $("help-widen").textContent = `${S.cfg.widen_s} s`;
+  if (S.session.mode !== "queue") {
+    $("skip-replay").classList.add("hidden");
+    $("skip").classList.add("hidden");
+  }
   $("mode").textContent = S.session.mode === "queue" ? `queue: ${S.session.queue_name}` :
                           `full fight: ${S.session.fight_id}`;
   if (S.session.mode === "queue") {

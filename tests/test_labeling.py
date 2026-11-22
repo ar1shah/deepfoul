@@ -14,7 +14,7 @@ from deepfoul.io.fights import window
 from deepfoul.labeling.app import create_app
 from deepfoul.labeling.events_store import (EVENT_COLS, EventStore, default_source,
                                             validate_event)
-from deepfoul.labeling.queues import (Skips, build_practice_queue, golden_t, item_done,
+from deepfoul.labeling.queues import (Skips, build_practice_queue, done_items, golden_t, item_done,
                                       load_queue, read_csv, write_queue)
 
 CFG = load_config()
@@ -243,3 +243,79 @@ def test_api_video_range_and_unknown_fight(client):
     assert client.get("/video/not_a_fight").status_code == 404
     assert client.get("/video/..%2F..%2Fpyproject").status_code == 404
     assert client.get("/").status_code == 200
+
+
+# ---------- 2.2: nearest-item done rule, widen, skip reasons ----------
+def _q(*ts, fid=FID):
+    return [{"item_id": f"i{k}", "fight_id": fid, "t_s": t} for k, t in enumerate(ts)]
+
+
+def _ev(a, b, fid=FID):
+    return {"fight_id": fid, "start_s": a, "end_s": b}
+
+
+def test_done_items_one_label_closes_the_nearest_item():
+    items = _q(100.0, 108.0)                              # windows [96,104] and [104,112] touch
+    assert done_items(items, [_ev(103.0, 105.0)], 4, 4) == {"i0"}   # 103 is nearer to 100
+    assert done_items(items, [_ev(105.0, 106.0)], 4, 4) == {"i1"}
+    assert done_items(items, [_ev(103.0, 103.5), _ev(109.0, 110.0)], 4, 4) == {"i0", "i1"}
+
+
+def test_done_items_widened_label_closes_its_item():
+    items = _q(100.0, 120.0)
+    ev = [_ev(93.0, 93.5)]                                # outside [96, 104]
+    assert done_items(items, ev, 4, 4) == set()
+    assert done_items(items, ev, 4, 4, widen_s=4.0, widen={"i0": 1}) == {"i0"}
+    # widened far enough to overlap the neighbour: still only the nearest item closes
+    ev = [_ev(115.5, 116.5)]                              # in i0 widened x3 and in i1
+    assert done_items(items, ev, 4, 4, widen_s=4.0, widen={"i0": 3}) == {"i1"}
+    assert done_items(items, [_ev(99, 101, fid="ufc299_omalley_vera")], 4, 4) == set()
+
+
+def test_skips_keep_a_reason_and_read_the_old_list(tmp_path):
+    p = tmp_path / "q.skips.json"
+    p.write_text('["a", "b"]', encoding="utf-8")          # 2.1 format
+    s = Skips(p)
+    assert s.ids == {"a", "b"}
+    s.set("c", reason="replay")
+    back = Skips(p)
+    assert back.data == {"a": "", "b": "", "c": "replay"}
+    back.set("a", False)
+    assert Skips(p).ids == {"b", "c"}
+
+
+@pytest.fixture
+def qclient(tmp_path):
+    cfg = {**CFG, "paths": {**CFG["paths"], "raw": tmp_path / "raw"}}
+    (tmp_path / "raw").mkdir()
+    (tmp_path / "raw" / f"{FID}.mp4").write_bytes(b"0" * 64)
+    queue = [{"item_id": "q_01", "fight_id": FID, "t_s": 600.0, "score": "", "reason": "guard"},
+             {"item_id": "q_02", "fight_id": FID, "t_s": 615.0, "score": "", "reason": "guard"}]
+    app = create_app(cfg, tmp_path / "events.csv", "queue", queue=queue, queue_name="t",
+                     skips_path=tmp_path / "t.skips.json", widen_path=tmp_path / "t.widen.json",
+                     warm_probe=False)
+    return TestClient(app)
+
+
+def test_api_widen_and_done(qclient):
+    s = qclient.get("/api/session").json()
+    assert s["config"]["scrub_s"] == 0.5 and s["config"]["widen_s"] == 4.0
+    assert s["config"]["clean_reasons"][:2] == ["cut", "ref warning"]
+    assert [it["widen"] for it in s["items"]] == [0, 0]
+    assert qclient.post("/api/widen/q_01", json={"n": 1}).json()["widen"] == 1
+    assert qclient.post("/api/widen/q_01", json={"n": -1}).status_code == 422
+    assert qclient.post("/api/widen/nope", json={"n": 1}).status_code == 404
+    r = qclient.post("/api/events", json=row(start_s=593.0, end_s=593.5, foul_type="clean",
+                                             offender="none", contact="no"))
+    assert r.status_code == 200
+    st = {it["item_id"]: it for it in qclient.get("/api/session").json()["items"]}
+    assert st["q_01"]["widen"] == 1
+    assert (st["q_01"]["status"], st["q_02"]["status"]) == ("done", "todo")
+
+
+def test_api_skip_reason(qclient):
+    r = qclient.post("/api/skip/q_02", json={"skipped": True, "reason": "replay"}).json()
+    assert r == {"item_id": "q_02", "skipped": True, "reason": "replay"}
+    it = qclient.get("/api/session").json()["items"][1]
+    assert (it["status"], it["skip_reason"]) == ("skipped", "replay")
+    assert qclient.get("/api/events").json() == []        # nothing written to events.csv

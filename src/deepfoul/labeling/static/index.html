@@ -32,12 +32,13 @@
       <span id="playstate" class="muted"></span>
     </div>
     <div id="timeline" class="timeline">
+      <div id="tl-base" class="tl-base hidden"></div>
       <div id="tl-draft" class="tl-draft"></div>
       <div id="tl-marks"></div>
       <div id="tl-cand" class="tl-cand hidden"></div>
       <div id="tl-head" class="tl-head"></div>
     </div>
-    <div class="tl-labels"><span id="tl-left"></span><span id="tl-right"></span></div>
+    <div class="tl-labels"><span id="tl-left"></span><span id="tl-widen" class="widen-tag"></span><span id="tl-right"></span></div>
   </section>
   <aside class="panel">
     <h2 id="draft-title">New event</h2>
@@ -49,6 +50,8 @@
         <button data-v="hard_negative"><kbd>4</kbd> hard neg</button>
         <button data-v="clean"><kbd>5</kbd> clean</button>
       </div></div>
+    <div class="field"><label>quick clean (type + note in one key)</label>
+      <div class="choices" id="quick"></div></div>
     <div class="field"><label>offender</label>
       <div class="choices" data-field="offender">
         <button data-v="red" class="red"><kbd>R</kbd> <span id="red-name">red</span></button>
@@ -72,9 +75,10 @@
     <div class="field"><label>notes <kbd>N</kbd></label>
       <input id="notes" type="text" autocomplete="off" placeholder="optional"></div>
     <div class="actions">
-      <button id="save-next" class="primary"><kbd>Enter</kbd> save + next</button>
+      <button id="save-next" class="primary"><kbd>Enter</kbd> save + next now</button>
       <button id="save-stay"><kbd>Shift+Enter</kbd> save + stay</button>
       <button id="skip"><kbd>S</kbd> skip</button>
+      <button id="skip-replay"><kbd>0</kbd> replay (skip)</button>
       <button id="new-draft">clear</button>
     </div>
     <div id="msg" class="msg"></div>
@@ -95,10 +99,13 @@
       <tr><td><kbd>M</kbd></td><td>footage live / slow-mo (label only, not playback)</td></tr>
       <tr><td><kbd>[</kbd> / <kbd>]</kbd></td><td>set start / end at the current frame</td></tr>
       <tr><td><kbd>Space</kbd></td><td>play / pause (after the clip end: replay the clip)</td></tr>
-      <tr><td><kbd>←</kbd> / <kbd>→</kbd></td><td>scrub 1 s (<kbd>Shift</kbd>: 5 s)</td></tr>
+      <tr><td><kbd>6</kbd>-<kbd>9</kbd>, <kbd>Shift+6</kbd> <kbd>Shift+7</kbd></td><td>clean + a reason note in one key: <span id="help-quick"></span></td></tr>
+      <tr><td><kbd>0</kbd></td><td>broadcast replay: skip the item (never saved as clean)</td></tr>
+      <tr><td><kbd>←</kbd> / <kbd>→</kbd></td><td>scrub <span id="help-scrub"></span> (<kbd>Shift</kbd>: <span id="help-scrub-big"></span>), stops at the clip edges</td></tr>
+      <tr><td><kbd>W</kbd></td><td>widen the clip by <span id="help-widen"></span> on each side (again for more)</td></tr>
       <tr><td><kbd>,</kbd> / <kbd>.</kbd></td><td>one frame back / forward</td></tr>
-      <tr><td><kbd>-</kbd> / <kbd>=</kbd></td><td>playback speed 0.25 / 0.5 / 1 / 2</td></tr>
-      <tr><td><kbd>Enter</kbd></td><td>save and next (updates a loaded event)</td></tr>
+      <tr><td><kbd>-</kbd> / <kbd>=</kbd></td><td>playback speed 0.25 / 0.5 / 1 / 1.5 / 2 (kept across fights)</td></tr>
+      <tr><td><kbd>Enter</kbd></td><td>save and go to the next item now, no need to wait for the clip end (updates a loaded event)</td></tr>
       <tr><td><kbd>Shift+Enter</kbd></td><td>save and stay on this clip</td></tr>
       <tr><td><kbd>S</kbd></td><td>skip this item</td></tr>
       <tr><td><kbd>U</kbd></td><td>undo the last save (deletes that row, goes back to it)</td></tr>

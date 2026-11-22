@@ -37,6 +37,9 @@ video#video { width: 100%; max-height: 70vh; display: block; background: #000; }
 .tl-draft.auto { border-style: dashed; }
 .tl-mark { position: absolute; top: 4px; bottom: 4px; min-width: 4px; border-radius: 2px; opacity: .85; }
 .tl-mark.editing { outline: 2px solid #fff; }
+.tl-base { position: absolute; top: 0; bottom: 0; background: rgba(255,255,255,.08);
+  border-left: 1px solid #5a606b; border-right: 1px solid #5a606b; pointer-events: none; }
+.widen-tag { color: var(--accent); }
 .tl-cand { position: absolute; top: 0; bottom: 0; width: 0; border-left: 2px dotted #fff; }
 .tl-head { position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; pointer-events: none; }
 .tl-labels { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; }
