@@ -21,6 +21,7 @@ dependencies = [
     "trackers>=2.7.0",
     "fastapi>=0.165.0",
     "uvicorn>=0.54.0",
+    "matplotlib>=3.11.2",
 ]
 
 [project.scripts]

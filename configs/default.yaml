@@ -204,3 +204,32 @@ identity_issue_checks:
   - {n: 7, clip: golden_05, t: 672, note: "ref walks behind Shara, new ID"}
   - {n: 8, clip: golden_06, t: 521, note: "angle change, fighters and ref cycle IDs"}
   - {n: 8, clip: golden_06, t: 528, note: "angle change, IDs fixed again"}
+
+# Stoppage finder, 2.2 (`deepfoul mine`). Signals are 0-1 on a step_s grid; geometry in torso
+# lengths, motion in torso lengths per second. Each signal looks at most lookahead_s ahead (the
+# past is free). See mining/signals.py. Tuned on the 8 train known fouls only.
+mining:
+  step_s: 0.25
+  after_s: 2.0              # lookahead of every signal (capped at lookahead_s)
+  guard_before_s: 10.0      # guard: a guard up over the last this many seconds ...
+  guard_up: 0.5             # ... = nearest own hand within this of own head
+  guard_down: 0.9           # then every fighter's nearest hand farther than this (~p90 in fights)
+  before_s: 3.0             # pause: median motion over [t - before_s, t) vs the lookahead
+  active_motion: 1.0        # "before" motion at or above this = full weight for a drop
+  still_motion: 0.6         # bend counts only while that fighter moves less than this
+  eye_r: 0.12               # eye: own hand point within this of own head centre
+  groin_r: 0.15             # groin: own hand point within this of own hip midpoint
+  bend_deg: 50              # bend: shoulders -> hips more than this from vertical
+  hold_s: 0.75              # eye / groin / bend held this long in the lookahead = full score
+  ref_speed: 3.0            # ref speed vs the fighters' midpoint (ref heights / s) = full score
+  onset_back_s: 3.0         # queue time = peak bin - this (hands drop ~3 s after the foul)
+  per_fight: 20             # top candidates per fight in the queue
+  min_signal: 0.3           # a signal under this isn't named in the reason
+  # Tuned on the train known fouls: these weights + guard_before_s + onset_back_s. The other
+  # signals added no train hits, so they only name the reason. `untuned` is the reference run in
+  # the report (equal weights, guard history = before_s, queue time = peak - 0.5 s).
+  weights: {guard: 1.0, pause: 0.0, ref: 0.0, eye: 0.0, groin: 0.0, bend: 0.0, closeup: 0.0}
+  untuned:
+    weights: {guard: 1.0, pause: 1.0, ref: 1.0, eye: 1.0, groin: 1.0, bend: 1.0, closeup: 1.0}
+    guard_before_s: 3.0
+    onset_back_s: 0.5

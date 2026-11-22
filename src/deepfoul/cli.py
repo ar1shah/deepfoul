@@ -987,6 +987,94 @@ def pd_read(path):
 
 
 @app.command()
+def mine(
+    fight_ids: list[str] = typer.Argument(None, help="fight_ids (train or val) to mine."),
+    all_: bool = typer.Option(False, "--all", help="Every train fight with a keypoint cache."),
+    check: bool = typer.Option(False, "--check", help="Also score the val fights for the "
+                               "known-foul recall check (in memory, never queued)."),
+    sheets: bool = typer.Option(True, "--sheets/--no-sheets", help="Top-candidate contact "
+                                "sheets (ffmpeg, a few seconds per fight)."),
+) -> None:
+    """Stoppage finder: rank candidate foul moments from the keypoint cache into label queues."""
+    import csv
+
+    from deepfoul.io.fights import window
+    from deepfoul.labeling.queues import write_queue
+    from deepfoul.mining.miner import (build_mined, fight_queue, known_ranks, load_rows,
+                                       mine_fight, variant_cfg, write_fight_queue)
+    from deepfoul.mining.report import plot_signals, write_report, write_top_sheet
+    from deepfoul.perception.extract import keypoints_paths
+
+    cfg = load_config()
+    mcfg, lab = cfg["mining"], cfg["labeling"]
+    labels = cfg["paths"]["labels"]
+    every = _fight_rows([], None)
+    has_cache = {r["fight_id"].strip() for r in every
+                 if keypoints_paths(cfg["paths"]["keypoints"], r["fight_id"].strip())["boxes"].exists()}
+    if not fight_ids and not all_ and not check:
+        raise typer.BadParameter("give fight_ids, --all or --check")
+    rows = _fight_rows(fight_ids) if fight_ids else []
+    if all_:
+        rows += [r for r in every if r["split"].strip() == "train"]
+    if check:
+        rows += [r for r in every if r["split"].strip() == "val"]
+    seen, picked = set(), []
+    for r in rows:
+        fid = r["fight_id"].strip()
+        if fid in seen:
+            continue
+        seen.add(fid)
+        if r["split"].strip() == "test":
+            raise typer.BadParameter(f"{fid} is a test fight: never mined")
+        if fid not in has_cache:
+            typer.echo(f"{fid}: no keypoint cache, skipped (run `deepfoul extract`)")
+            continue
+        picked.append(r)
+    with (labels / "notes" / "known_fouls.csv").open(newline="", encoding="utf-8") as f:
+        fouls = list(csv.DictReader(f))
+    qdir, odir = cfg["paths"]["queues"], cfg["paths"]["outputs"] / "mining"
+    pb, pa = lab["pad_before_s"], lab["pad_after_s"]
+    results = []
+    for r in picked:
+        fid, split = r["fight_id"].strip(), r["split"].strip()
+        w0, w1 = window(r)
+        kp = keypoints_paths(cfg["paths"]["keypoints"], fid)["boxes"]
+        if w1 is None:
+            w1 = float(pd_read_meta(kp)["window"][1])
+        w = (w0 or 0.0, w1)
+        df = load_rows(kp, *w)
+        mine_f = [f for f in fouls if f["fight_id"] == fid]
+        out = {}
+        for variant in ("untuned", "tuned"):
+            out[variant] = mine_fight(df, w, variant_cfg(mcfg, variant), cfg["kpt_conf_min"],
+                                      cfg["lookahead_s"], lab["min_gap_s"])
+        sig, cands = out["tuned"]
+        queued = split == "train" or (split == "val" and fid in (fight_ids or []))
+        if queued:
+            write_fight_queue(qdir, fid, fight_queue(fid, cands))
+        plot_signals(fid, sig, cands, mine_f, mcfg["onset_back_s"], odir / f"{fid}_signals.png")
+        if sheets and split == "train":
+            write_top_sheet(cfg["paths"]["raw"] / f"{fid}.mp4", cands, mcfg["onset_back_s"],
+                            odir / f"{fid}_top.jpg")
+        ranks = {v: known_ranks(out[v][1], mine_f, pb, pa) for v in out}
+        results.append({"fight_id": fid, "split": split, "cands": cands, "ranks": ranks,
+                        "queued": queued})
+        typer.echo(f"{fid} ({split}): {len(cands)} candidates, known fouls "
+                   f"{[_r['rank'] for _r in ranks['tuned']]}" + ("" if queued else ", not queued"))
+    train_ids = [r["fight_id"].strip() for r in every if r["split"].strip() == "train"]
+    items, extra = build_mined(qdir, train_ids, fouls, pb, pa)
+    write_queue(items, qdir / "mined.csv")
+    write_report(odir / "report.md", results, len(items), extra, mcfg["per_fight"])
+    typer.echo(f"mined.csv: {len(items)} items ({len(extra)} extra) -> {qdir / 'mined.csv'}")
+    typer.echo(f"report: {odir / 'report.md'}")
+
+
+def pd_read_meta(path):
+    from deepfoul.perception.extract import read_meta
+    return read_meta(path)
+
+
+@app.command()
 def label(
     queue: str = typer.Option(None, "--queue", help="Queue name in data/queues/ (default: practice)."),
     fight: str = typer.Option(None, "--fight", help="Full-fight mode for this fight_id."),
