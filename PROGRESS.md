@@ -14,7 +14,7 @@ Claude Code updates this file at the end of every ROADMAP section. Newest entrie
 | 1 | 1.5 Overlay renderer v1 + benchmark | Done (golden renders with skeletons, 10.2 fps full pass) |
 | 2 | 2.1 Labeling app | Done (practice run: 30 moments in ~13:00) |
 | 2 | 2.2 Stoppage finder | Done (train known fouls in top 20: 7/8; val 3/6, held out) |
-| 2 | 2.3 Dataset builder | Not started |
+| 2 | 2.3 Dataset builder + ingest | Done (1599 train windows; hardneg + random queues ready to label) |
 | 3 | 3.1 Evaluation harness | Not started |
 | 3 | 3.2 Feature layer | Not started |
 | 3 | 3.3 Rule detectors v0 | Not started |
@@ -44,10 +44,10 @@ Claude Code updates this file at the end of every ROADMAP section. Newest entrie
   - GPU memory: 3.1 GB of 8 GB, flat during the pass.
   - The 13 non-test fights (405k processed frames) take **~11 h** of extract (measured: 11h15m).
 - Shot detection (CPU decode): ~190 fps at 1080p30, ~110 fps at 60 fps. All 9 train fights: ~38 min.
-- Labeled positives: eye_poke - / low_blow - / open_hand -
+- Labeled positives (train, after the mined queue + relabel): eye_poke 4 / low_blow 11 / open_hand 9, hard negatives 11 + 1 stoppage clip. Dataset (`build-dataset`): 1599 windows = 32 eye poke / 89 low blow / 61 open hand / 100 hard negative / 1317 clean, all train (val has no labels until 3.0)
 - Labeling app (2.1): seek 15-475 ms on H.264 / VP9 / AV1 in Chromium, item switch ≤ 0.8 s, browser frame = original-file frame on 6/6 checks. Practice run: 30 moments in ~13:00 (26 s each)
 - Stoppage finder (2.2): known fouls in their fight's top 20, train 7/8 (untuned 3/8), val 3/6 (held out). `mined.csv` 181 items (~60 min of labeling). `mine --all --check` ~5 min for 13 fights
-- Fights: train 9 / val 4 / test 2 (8 foul, 5 clean, 2 test). Known fouls: 16 (`labels/notes/known_fouls.csv`)
+- Fights: train 9 / val 4 / test 2 (9 foul, 4 clean, 2 test; Magomedov-Petrosyan moved to foul in 2.3). Known fouls: 23 (`labels/notes/known_fouls.csv`, 7 found while labeling in 2.3)
 - Val fights: Cortes Acosta-Delija, Kape-Silva, Gaethje-Holloway, Garry-Prates (6 known fouls). Kape-Silva and Garbrandt-Long swapped splits after 0.2, because Garbrandt-Long's video is cropped and likely frame-interpolated.
 - Best val metrics: -
 - Test metrics: -
@@ -72,7 +72,6 @@ Claude Code updates this file at the end of every ROADMAP section. Newest entrie
 - Shot detection misses **dissolves** (gradual transitions). They only showed up in between-round segments (Garbrandt 12:16-13:36, Holland 20:13-21:13), which 4.2 skips.
 - Slow-motion replays can fire bursts of fake cuts (Battle-Loosa 09:40-09:43, 4 shots under 1 s). Replays are tagged in 4.2.
 - Jandiroba-Dern has a sponsor overlay (bottom right) burned into the official UFC upload.
-- **Magomedov-Petrosyan may have unlisted fouls** (2.2 contact sheets: red timeout clocks around 06:20-06:55 and 09:14-09:42). It's listed as clean in `labels/notes/`; the mined queue covers both, so Ari's labels settle it.
 - No Gane-Hokit (UFC 334) row yet; add it once a video exists. No truly similar-shorts fight yet (Barber-Grasso grey vs black is the stand-in); a data-round task.
 
 ## Switching machines (later, not now)
@@ -122,6 +121,129 @@ Per fight, b/m of visible is 78-96%, median 90.
 - **Velocity features (3.2):** must use real `t` deltas (Garbrandt-Long's duplicate frames).
 
 ## Log
+
+### 2026-11-23 · Section 2.3 · Dataset builder + ingest
+**Label audit (pause point, before any dataset code).** Ari labeled the 181-item mined queue on the Mac (190 rows). The audit found:
+- **All 8 train known fouls labeled** with the right type and offender.
+- **Fouls nobody had listed:**
+  - In the mined queue: Magomedov-Petrosyan (listed as clean) has 4 low blows (06:17, 07:57, 09:15, 10:04), and Edwards-Muhammad has a low blow at 02:56.
+  - In the relabel pass: Munhoz-O'Malley low blow 05:17 (O'Malley) and Edwards-Muhammad eye poke 06:14 (Edwards).
+  - All 7 are in `known_fouls.csv`, and Magomedov-Petrosyan is now `bucket=foul`.
+- **Key confusion:** `Shift+6` (round break) and `7` (ref warning) were used for **foul timeouts** (30 rows, e.g. "round break, recovery after foul"). The rows are right as clean; the builder reads the note.
+- **4 replays were saved as clean** with a "replay being shown" note instead of `0`. The builder excludes them.
+- **8 rows to fix** went into `data/queues/relabel.csv`: duplicates, a zero-length row, an open glove in a clinch saved as open hand, a 3.3 s open hand, two "after foul" notes with no foul, and one offender to confirm. Ari fixed them in the app, and the re-audit confirmed all 8.
+
+**Built:**
+- **Edit queues in the labeling app** (a queue file with an `event_ids` column, e.g. `relabel`):
+  - each item opens its listed event for editing, and the clip covers the event
+  - an item is done only after a save or delete on it (`<name>.done.json`), not by overlap
+- **`Delete` / `Backspace` deletes the loaded event.** The Mac's delete key is Backspace, and both are ignored in the notes field. The status line says "deleted ev_X, U to undo", and `U` adds the row back (with a new id).
+- **`Shift+8` = clean + "foul timeout".**
+- **Ari's own app changes (on the Mac):** static files are version-stamped so a cached old `app.js` is never used, and clicking an event outside the clip moves the clip to it.
+- **`deepfoul build-dataset [--sheet]`** (`dataset/build.py`, `report.py`, `windows.py`, config `dataset:`):
+  - **Windows:** 2 s long. Event windows are on a 0.25 s grid and need at least 50% of the event's span; clean windows are on a 0.5 s grid.
+  - **Priority:** eye poke > low blow > open hand > hard negative when one window fits two events. A window that only grazes a higher-priority event is dropped.
+  - **Buffers** (`buffer_s`: fouls 2 s, open hand and hard negative 1 s): no clean window touches an event's span ± buffer.
+  - **Clean comes only from reviewed time:**
+    - the 8 s clip of every labeled queue item in `mined`, `hardneg` and `random` (Ari reviewed the whole clip; the saved clean span is just the default 1 s)
+    - or a whole fight window once it has `full_fight` labels
+    - unlabeled time inside a foul clip is clean outside the buffer
+  - **Note categories** (`dataset.note_categories`; whole-word, case-insensitive, first match wins, so "uppercut" is not "cut"):
+    - `replay`, `foul timeout` / `after foul` / `recovery` / `waved off`, `round break` and `other` exclude their clip
+    - `cut` / `ref warning` / `slip` / `glove touch` make it a hard negative (weight 3)
+  - **Splits** come from `fights.csv`:
+    - an unknown fight is an error
+    - test fights never get a window (asserted)
+    - each fight has one split
+  - **Output:** `data/dataset/windows.parquet` is an index (`window_id, fight_id, split, t0, t1, label, offender, weight, event_id, source_kind, coverage`). For 3.2, `window_keypoints()` reads a window's red/blue keypoints from the cache, with a merged box going to its `raw_label` side.
+  - **`outputs/dataset/summary.md`:**
+    - windows per class per split and per fight (clean per fight included)
+    - a plain statement that clean comes only from mined clips
+    - every noted clean row with its category
+    - every labeled event with its window count
+    - the label audit, re-run on every build: duplicates, lengths outside 0.2-3 s, clean rows with offender/contact, clean rows outside every clip, known fouls with no label, foul labels not in `known_fouls.csv`
+  - **`--sheet`** writes contact sheets of the window nearest each event + 15 random clean windows.
+- **`deepfoul ingest [ids] [--draft] [--no-extract]`** (`ingest.py`):
+  1. Merges `labels/fights_draft.csv` into `fights.csv` after validation (columns, new ids, split, shorts colors, URL, window). On any problem nothing is written. The draft is archived to `labels/notes/drafts/<date>_fights_draft.csv`.
+  2. Fetch. Test fights stop here.
+  3. `extract`. Fights without shorts colors or a window are listed as blocked.
+  4. `mine`, for train fights whose queue is missing or older than their cache.
+  5. Writes `outputs/ingest/<date>.md`: fetch, extract, b/m of visible, queue size, known-foul ranks.
+
+  Each stage skips what's up to date, so ingest can be re-run.
+- **`deepfoul mine --hardneg`** (`mining/hardneg.py`, config `hardneg:`). Only frames with one red and one blue box count (a merged box has no opponent skeleton).
+  - **Face:** a hand point within 0.6 torso lengths of the opponent's head centre, moving fast, with fingers not extended. An extended hand is an open hand, which is a positive.
+  - **Groin:** a knee, ankle or foot point within 0.6 of the opponent's hip midpoint, moving fast.
+  - **Score** = proximity x speed.
+  - **Filters:** no stoppage in the next 5 s (guard signal < 0.3), and at least 10 s from labels, known fouls and other queue items.
+  - **Quota:** 8 face + 7 groin per fight.
+  - **Output:** `data/queues/hardneg.csv` + `outputs/mining/hardneg_<fid>.jpg`.
+- **`deepfoul mine --random`** (config `random_queue:`): 10 random moments per train fight, at least 10 s from everything else, seeded, to `data/queues/random.csv`. Labeled random clips count as reviewed regions.
+- **Tests:** 39 new (196 passed, 2 xfailed):
+  - `test_dataset.py`: splits, windowing, buffers, reviewed clips, categories on every real note, full-fight mode, audit, keypoint loader
+  - `test_ingest.py`
+  - `test_hardneg.py`
+  - edit-queue tests in `test_labeling.py`
+  - The practice-queue test no longer hardcodes the 0.2 known-foul count.
+
+**Decisions:**
+- **Ari picked D1-D4 as recommended:**
+  - clean only from reviewed clips
+  - timeouts, round breaks and replays excluded from negatives
+  - an index + loader, not tensors
+  - ingest + hardneg stay in 2.3
+- **Ari's additions:**
+  - push before the pause
+  - re-audit the relabel items after "fixed"
+  - Delete + Backspace
+  - "how far back" hints in the relabel reasons
+  - whole-word note matching
+  - a per-row category table
+  - clean counts per fight
+  - the optional random queue (built: it was small)
+- **Relabel hints came from the cache** (2.2 signals around each moment):
+  - Munhoz: groin holds at 05:17 and 05:21. The foul turned out to be at 05:16.6.
+  - Edwards: hand on groin + guard drop from 06:21. It turned out to be an eye poke at 06:14.
+- **Hard-negative thresholds were checked against the labeled moments:**
+  - On Magomedov, the 07:57 and 09:15 low blows score 0.85 / 0.38 as groin strikes, with the striker matching Ari's offender.
+  - The labeled hard-negative leg kicks score up to 0.49. The 99th percentile of frames is 0.67-0.85.
+  - Face strikes are about 2x as common as groin ones, hence the per-zone quota.
+
+**Verified:**
+- **`build-dataset` on the real labels:** 1599 windows, all train.
+  - Every foul has windows, no clip window is outside a mined clip, and no clean window is in a buffer zone.
+  - Mean coverage is 0.91-1.00 per fight. 29 clean and 4 low-blow windows are under 0.5; the column is there for 3.2 to filter.
+- **Sheets checked by eye** (`outputs/dataset/sheet_*.jpg`):
+  - positives: kicks at contact for the low blows, arms out for the open hands and pokes
+  - hard negatives: clinch hands, inside kicks, knees
+  - clean: live action, heavy on clinches and ground work (the mined-clip bias)
+- **Relabel flow in the built-in browser,** on a scratch events file:
+  - Backspace / Delete / `U`, and Backspace inside the notes field
+  - an out-of-clip event is reachable
+  - save -> done -> next item with its event loaded
+  - `Shift+8`
+  - `labels/events.csv` was untouched by the test.
+- **`ingest` on the current 15 fights** (no draft): every stage up to date, `mined.csv` unchanged (md5), report written. No new fight was available to run it end to end on a download; the merge is unit-tested.
+- **`mine --hardneg`:** 128 items over the 9 train fights (Battle 12, Edwards 11: short fights crowded by labels and mined items). Sheets checked by eye:
+  - Magomedov-Petrosyan: nearly all punches and kicks landing at the head or legs
+  - Jandiroba-Dern: about 12 of 15 strikes; the rest are clinch or ground scrambles plus one between-rounds close-up (21:03)
+- **`mine --random`:** 73 items. Edwards has 1 and Battle 2, because their short windows are already covered by mined and hardneg items at 10 s spacing.
+- `uv run pytest`: 196 passed, 2 xfailed. `git status`: nothing under `data/` or `outputs/`.
+
+**Golden set:** n/a (no perception change).
+
+**Known issues:**
+- **Clean is biased toward mined clips** (clinches, stoppages, hands coming down). The random queue fixes this once it's labeled.
+- **Event ids are reused after the highest ids are deleted:** the store uses max + 1, so ev_00189 / ev_00190 (deleted duplicates) are now two open hands. Nothing references old ids, but an id isn't permanent.
+- **Every positive gets 8-9 windows** wherever the foul falls inside the 2 s, including windows that end right at contact (no reaction visible). 3.2 / 5.x may want to weight by position.
+- **Unlabeled time after a ref-stopped foul is clean** past the 2 s buffer (Ari's rule). It's the ref stepping in, a valid "reaction, no contact" negative, but worth watching in 3.3.
+- **Battle-Loosa 06:56.75 (ev_00053, hard negative):** the frame shows Loosa holding his face with the clock at 0:03. Worth a second look.
+- **The hardneg miner skips merged frames,** so clinch knees aren't candidates (the 4.1 merged-box blind spot).
+- **The two relabel finds are mining misses** (Munhoz 05:17, Edwards 06:14 in the ingest report). The next `mine` rebuild adds them to `mined.csv` as `extra` items; they're already labeled, so they show as done.
+
+**Next:**
+- Ari: `git pull`, copy `data/queues/hardneg.csv` and `random.csv` from the PC to the Mac (the Mac has no keypoint cache to mine from). Label `--queue hardneg` and `--queue random`, then push.
+- Then 3.0 (label the val fights in full-fight mode) and 3.1 (evaluation harness).
 
 ### 2026-11-21 · Section 2.2 · Stoppage finder
 **Practice run (2.1, Ari):** 30 moments in about 13:00 on the Mac in Chrome (26 s each, target 20 s). No lag, and the key list was good. The arrow steps were too big, and scrubbing could leave the clip.
