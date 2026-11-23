@@ -1,1 +1,191 @@
 event_id,fight_id,start_s,end_s,foul_type,offender,contact,ref_stopped,speed,source,notes
+ev_00001,ufc326_garbrandt_long,163.5,164.5,clean,none,no,no,live,mined,
+ev_00002,ufc326_garbrandt_long,283,284,clean,none,no,no,live,mined,
+ev_00003,ufc326_garbrandt_long,338.75,339.75,clean,none,no,no,live,mined,round break
+ev_00004,ufc326_garbrandt_long,364,365,clean,none,no,no,live,mined,round break
+ev_00005,ufc326_garbrandt_long,387.5,388.5,clean,none,no,no,live,mined,round break
+ev_00006,ufc326_garbrandt_long,387.5,388.5,clean,none,no,no,live,mined,"round break, replay being shown"
+ev_00007,ufc326_garbrandt_long,536.75,537.75,clean,none,no,no,live,mined,slip
+ev_00008,ufc326_garbrandt_long,810,810.88,low_blow,blue,unsure,yes,live,mined,
+ev_00009,ufc326_garbrandt_long,836.75,837.75,clean,none,no,no,live,mined,"round break, replay being shown"
+ev_00010,ufc326_garbrandt_long,855.25,856.25,clean,none,no,no,live,mined,"ref warning, recovery period for foul"
+ev_00011,ufc326_garbrandt_long,880.73,881.38,low_blow,blue,yes,yes,live,mined,
+ev_00012,ufc326_garbrandt_long,892.75,893.75,clean,none,no,no,live,mined,"ref warning, recovery period during after foul"
+ev_00013,ufc326_garbrandt_long,904.5,905.5,clean,none,no,no,live,mined,"ref warning, recovery period after foul"
+ev_00014,ufc326_garbrandt_long,939.5,940.5,clean,none,no,no,live,mined,"round break, recovery period after foul"
+ev_00015,ufc326_garbrandt_long,1006.5,1007.5,clean,none,no,no,live,mined,"round break, recovery period after foul"
+ev_00016,ufc326_garbrandt_long,1035.5,1036.5,clean,none,no,no,live,mined,"round break, recovery period after foul"
+ev_00017,ufc326_garbrandt_long,1077.23,1077.8,low_blow,blue,unsure,yes,live,mined,
+ev_00018,ufc326_garbrandt_long,1112.75,1113.75,clean,none,no,no,live,mined,"round break, replay being shown"
+ev_00019,ufc326_garbrandt_long,1130.25,1131.25,clean,none,no,no,live,mined,round break
+ev_00020,ufc326_garbrandt_long,1219.5,1220.5,clean,none,no,no,live,mined,
+ev_00021,ufc326_garbrandt_long,1365.5,1366.5,clean,none,no,no,live,mined,
+ev_00022,ufcfn20251018_holland_malott,302.43,303.37,low_blow,blue,yes,yes,live,mined,
+ev_00023,ufcfn20251018_holland_malott,328.75,329.75,clean,none,no,no,live,mined,
+ev_00024,ufcfn20251018_holland_malott,351.8,352.97,low_blow,blue,yes,yes,live,mined,
+ev_00025,ufcfn20251018_holland_malott,365.5,366.5,clean,none,no,no,live,mined,"round break, recovery after foul"
+ev_00026,ufcfn20251018_holland_malott,390.25,391.25,clean,none,no,no,live,mined,"round break, recovery after foul"
+ev_00027,ufcfn20251018_holland_malott,419.75,420.75,clean,none,no,no,live,mined,"round break, recovery after foul"
+ev_00028,ufcfn20251018_holland_malott,437,438,clean,none,no,no,live,mined,"round break, recovery after foul"
+ev_00029,ufcfn20251018_holland_malott,486.5,487.5,clean,none,no,no,live,mined,"round break, recovery after foul"
+ev_00030,ufcfn20251018_holland_malott,728,729,clean,none,no,no,live,mined,
+ev_00031,ufcfn20251018_holland_malott,761.75,762.75,clean,none,no,no,live,mined,round break
+ev_00032,ufcfn20251018_holland_malott,772.75,773.75,clean,none,no,no,live,mined,round break
+ev_00033,ufcfn20251018_holland_malott,813.5,814.5,clean,none,no,no,live,mined,round break
+ev_00034,ufcfn20251018_holland_malott,831.25,832.25,clean,none,no,no,live,mined,round break
+ev_00035,ufcfn20251018_holland_malott,846,847,clean,none,no,no,live,mined,round break
+ev_00036,ufcfn20251018_holland_malott,1135.25,1136.25,clean,none,no,no,live,mined,
+ev_00037,ufcfn20251018_holland_malott,1192.5,1193.5,clean,none,no,no,live,mined,
+ev_00038,ufcfn20251018_holland_malott,1229.5,1230.5,clean,none,no,no,live,mined,round break
+ev_00039,ufcfn20251018_holland_malott,1245.25,1246.25,clean,none,no,no,live,mined,round break
+ev_00040,ufcfn20251018_holland_malott,1257.75,1258.75,clean,none,no,no,live,mined,round break
+ev_00041,ufcfn20251018_holland_malott,1451,1452,clean,none,no,no,live,mined,
+ev_00042,ufcfn20251018_holland_malott,1482.75,1483.75,clean,none,no,no,live,mined,
+ev_00043,ufcfn20240316_battle_loosa,141.5,142.5,clean,none,no,no,live,mined,
+ev_00044,ufcfn20240316_battle_loosa,173.5,174.5,clean,none,no,no,live,mined,
+ev_00045,ufcfn20240316_battle_loosa,189.75,190.75,clean,none,no,no,live,mined,
+ev_00046,ufcfn20240316_battle_loosa,199.75,200.75,clean,none,no,no,live,mined,
+ev_00047,ufcfn20240316_battle_loosa,210.75,211.75,clean,none,no,no,live,mined,
+ev_00048,ufcfn20240316_battle_loosa,233,234,clean,none,no,no,live,mined,
+ev_00049,ufcfn20240316_battle_loosa,250.5,251.5,clean,none,no,no,live,mined,
+ev_00050,ufcfn20240316_battle_loosa,261.75,262.75,clean,none,no,no,live,mined,
+ev_00051,ufcfn20240316_battle_loosa,282.5,283.5,clean,none,no,no,live,mined,
+ev_00052,ufcfn20240316_battle_loosa,306,307,clean,none,no,no,live,mined,
+ev_00053,ufcfn20240316_battle_loosa,416.5,417.1,hard_negative,blue,no,no,live,mined,
+ev_00054,ufcfn20240316_battle_loosa,419,420,clean,none,no,no,live,mined,
+ev_00055,ufcfn20240316_battle_loosa,489.43,490.1,eye_poke,red,yes,yes,live,mined,
+ev_00056,ufcfn20240316_battle_loosa,500,501,clean,none,no,no,live,mined,"round break, recovery after foul"
+ev_00057,ufcfn20240316_battle_loosa,510.25,511.25,clean,none,no,no,live,mined,"round break, recovery after foul"
+ev_00058,ufcfn20240316_battle_loosa,520.5,521.5,clean,none,no,no,live,mined,"round break, recovery after foul"
+ev_00059,ufcfn20240316_battle_loosa,532.5,533.5,clean,none,no,no,live,mined,"round break, recovery after foul"
+ev_00060,ufcfn20240316_battle_loosa,544.75,545.75,clean,none,no,no,live,mined,"round break, recovery after foul"
+ev_00061,ufcfn20240316_battle_loosa,564.25,565.25,clean,none,no,no,live,mined,"round break, recovery after foul"
+ev_00062,ufcfn20240316_battle_loosa,574.5,575.5,clean,none,no,no,live,mined,"round break, recovery after foul"
+ev_00063,ufcfn20240316_battle_loosa,592,593,clean,none,no,no,live,mined,"round break, fight stopped after foul"
+ev_00064,ufc276_munhoz_omalley,164,165,clean,none,no,no,live,mined,
+ev_00065,ufc276_munhoz_omalley,199,200,clean,none,no,no,live,mined,
+ev_00066,ufc276_munhoz_omalley,225.18,226.22,hard_negative,none,yes,no,live,mined,clean inside kick
+ev_00067,ufc276_munhoz_omalley,267,268,clean,none,no,no,live,mined,
+ev_00068,ufc276_munhoz_omalley,322.75,323.75,clean,none,no,yes,live,mined,round break right after foul commited it seems
+ev_00069,ufc276_munhoz_omalley,465.75,466.75,clean,none,no,no,live,mined,
+ev_00070,ufc276_munhoz_omalley,491.75,492.75,clean,none,no,no,live,mined,round break
+ev_00071,ufc276_munhoz_omalley,520,521,clean,none,no,no,live,mined,round break
+ev_00072,ufc276_munhoz_omalley,531.25,532.25,clean,none,no,no,live,mined,round break
+ev_00073,ufc276_munhoz_omalley,592.86,593.58,open_hand,blue,no,no,live,mined,
+ev_00074,ufc276_munhoz_omalley,599.88,600.3,open_hand,blue,no,no,live,mined,
+ev_00075,ufc276_munhoz_omalley,631.5,632.5,clean,none,no,no,live,mined,
+ev_00076,ufc276_munhoz_omalley,712.25,713.25,clean,none,no,no,live,mined,
+ev_00077,ufc276_munhoz_omalley,727.2,727.72,eye_poke,blue,yes,yes,live,mined,
+ev_00078,ufc276_munhoz_omalley,743.25,744.25,clean,none,no,no,live,mined,round break after foul commited
+ev_00079,ufc276_munhoz_omalley,757.75,758.75,clean,none,no,no,live,mined,"round break, replay being shown"
+ev_00080,ufc276_munhoz_omalley,784.25,785.25,clean,none,no,no,live,mined,round break
+ev_00081,ufc276_munhoz_omalley,797.5,798.5,clean,none,no,no,live,mined,round break
+ev_00082,ufc276_munhoz_omalley,817,818,clean,none,no,no,live,mined,round break
+ev_00083,ufc276_munhoz_omalley,836.25,837.25,clean,none,no,no,live,mined,round break
+ev_00084,ufcfn20210313_edwards_muhammad,173.07,175.07,open_hand,red,no,no,live,mined,multiple open hands by leon edwards
+ev_00085,ufcfn20210313_edwards_muhammad,176.07,176.93,low_blow,blue,yes,yes,live,mined,
+ev_00086,ufcfn20210313_edwards_muhammad,200.43,200.83,open_hand,red,no,no,live,mined,
+ev_00087,ufcfn20210313_edwards_muhammad,218.25,219.25,clean,none,no,no,live,mined,
+ev_00088,ufcfn20210313_edwards_muhammad,228.5,229.5,clean,none,no,no,live,mined,
+ev_00089,ufcfn20210313_edwards_muhammad,242.25,243.25,clean,none,no,no,live,mined,
+ev_00090,ufcfn20210313_edwards_muhammad,252.5,253.5,clean,none,no,no,live,mined,
+ev_00091,ufcfn20210313_edwards_muhammad,281.5,282.5,clean,none,no,no,live,mined,
+ev_00092,ufcfn20210313_edwards_muhammad,297.5,298.5,clean,none,no,no,live,mined,
+ev_00093,ufcfn20210313_edwards_muhammad,318,319,clean,none,no,no,live,mined,
+ev_00094,ufcfn20210313_edwards_muhammad,337.5,338.5,clean,none,no,no,live,mined,
+ev_00095,ufcfn20210313_edwards_muhammad,378.25,379.25,clean,none,no,no,live,mined,"round break, break after foul called"
+ev_00096,ufcfn20210313_edwards_muhammad,461.25,462.25,clean,none,no,no,live,mined,
+ev_00097,ufcfn20210313_edwards_muhammad,476,477,clean,none,no,no,live,mined,round break
+ev_00098,ufcfn20210313_edwards_muhammad,499.5,500.5,clean,none,no,no,live,mined,round break
+ev_00099,ufcfn20210313_edwards_muhammad,511.25,512.25,clean,none,no,no,live,mined,round break
+ev_00100,ufcfn20210313_edwards_muhammad,546.67,547.53,eye_poke,red,yes,yes,live,mined,
+ev_00101,ufcfn20210313_edwards_muhammad,564.75,565.75,clean,none,no,no,live,mined,round break after foul commited
+ev_00102,ufcfn20210313_edwards_muhammad,589.75,590.75,clean,none,no,no,live,mined,round break after foul comitted
+ev_00103,ufcfn20210313_edwards_muhammad,608.75,609.75,clean,none,no,no,live,mined,round break after foul committed
+ev_00104,ufcfn20210313_edwards_muhammad,623,624,clean,none,no,no,live,mined,"round break, fight waved off after foul"
+ev_00105,ufc308_magomedov_petrosyan,35.25,35.84,hard_negative,none,yes,no,live,mined,clean inside leg kick
+ev_00106,ufc308_magomedov_petrosyan,38.75,39.75,clean,none,no,no,live,mined,
+ev_00107,ufc308_magomedov_petrosyan,146.81,147.45,hard_negative,none,yes,no,live,mined,clean inside leg kick
+ev_00108,ufc308_magomedov_petrosyan,207.25,208.25,clean,none,no,no,live,mined,
+ev_00109,ufc308_magomedov_petrosyan,242.04,242.78,hard_negative,none,yes,no,live,mined,clean inside leg kick
+ev_00110,ufc308_magomedov_petrosyan,243.25,244.25,clean,none,no,no,live,mined,
+ev_00111,ufc308_magomedov_petrosyan,267.25,268.25,clean,none,no,no,live,mined,
+ev_00112,ufc308_magomedov_petrosyan,307.77,308.51,hard_negative,none,yes,no,live,mined,clean inside leg kick
+ev_00113,ufc308_magomedov_petrosyan,308.75,309.75,clean,none,no,no,live,mined,
+ev_00114,ufc308_magomedov_petrosyan,350.48,351.12,hard_negative,none,yes,no,live,mined,clean inside leg kick
+ev_00115,ufc308_magomedov_petrosyan,367.25,368.25,clean,none,no,no,live,mined,
+ev_00116,ufc308_magomedov_petrosyan,377.21,377.98,low_blow,blue,yes,yes,live,mined,
+ev_00117,ufc308_magomedov_petrosyan,402.5,403.5,clean,none,no,no,live,mined,round break after foul
+ev_00118,ufc308_magomedov_petrosyan,415.25,416.25,clean,none,no,no,live,mined,round break after foul
+ev_00119,ufc308_magomedov_petrosyan,432.25,433.25,clean,none,no,no,live,mined,
+ev_00120,ufc308_magomedov_petrosyan,477.28,477.81,low_blow,blue,unsure,yes,live,mined,
+ev_00121,ufc308_magomedov_petrosyan,497.25,498.25,clean,none,no,no,live,mined,
+ev_00122,ufc308_magomedov_petrosyan,555.25,555.99,low_blow,red,yes,yes,live,mined,
+ev_00123,ufc308_magomedov_petrosyan,567,568,clean,none,no,no,live,mined,round break after foul
+ev_00124,ufc308_magomedov_petrosyan,582.25,583.25,clean,none,no,no,live,mined,round break after foul
+ev_00125,ufc308_magomedov_petrosyan,603.84,604.5,low_blow,blue,yes,yes,live,mined,
+ev_00126,ufc308_magomedov_petrosyan,675.5,676.5,clean,none,no,no,live,mined,
+ev_00127,ufc308_magomedov_petrosyan,685.5,686.5,clean,none,no,no,live,mined,
+ev_00128,ufc321_jandiroba_dern,125,126,clean,none,no,no,live,mined,
+ev_00129,ufc321_jandiroba_dern,183,184,clean,none,no,no,live,mined,
+ev_00130,ufc321_jandiroba_dern,196.5,197.5,clean,none,no,no,live,mined,
+ev_00131,ufc321_jandiroba_dern,339.75,340.75,clean,none,no,no,live,mined,
+ev_00132,ufc321_jandiroba_dern,611.75,612.75,clean,none,no,no,live,mined,
+ev_00133,ufc321_jandiroba_dern,636.25,637.25,clean,none,no,no,live,mined,
+ev_00134,ufc321_jandiroba_dern,696.25,697.25,clean,none,no,no,live,mined,
+ev_00135,ufc321_jandiroba_dern,739.25,740.25,clean,none,no,no,live,mined,
+ev_00136,ufc321_jandiroba_dern,838,839,clean,none,no,no,live,mined,
+ev_00137,ufc321_jandiroba_dern,868.25,869.25,clean,none,no,no,live,mined,
+ev_00138,ufc321_jandiroba_dern,890.5,891.5,clean,none,no,no,live,mined,
+ev_00139,ufc321_jandiroba_dern,903.5,904.5,clean,none,no,no,live,mined,
+ev_00140,ufc321_jandiroba_dern,926.5,927.5,clean,none,no,no,live,mined,
+ev_00141,ufc321_jandiroba_dern,1038.75,1039.75,clean,none,no,no,live,mined,
+ev_00142,ufc321_jandiroba_dern,1071.75,1072.75,clean,none,no,no,live,mined,
+ev_00143,ufc321_jandiroba_dern,1173.25,1174.25,clean,none,no,no,live,mined,
+ev_00144,ufc321_jandiroba_dern,1227.5,1228.5,clean,none,no,no,live,mined,
+ev_00145,ufc321_jandiroba_dern,1300,1301,clean,none,no,no,live,mined,
+ev_00146,ufc321_jandiroba_dern,1362.25,1363.25,clean,none,no,no,live,mined,
+ev_00147,ufc321_jandiroba_dern,1456.5,1457.5,clean,none,no,no,live,mined,
+ev_00148,ufc258_barber_grasso,164.25,165.25,clean,none,no,no,live,mined,
+ev_00149,ufc258_barber_grasso,168.24,168.77,open_hand,blue,no,no,live,mined,open glove in clinch not a foul
+ev_00150,ufc258_barber_grasso,186,187,clean,none,no,no,live,mined,
+ev_00151,ufc258_barber_grasso,260,261,clean,none,no,no,live,mined,
+ev_00152,ufc258_barber_grasso,270.75,271.75,clean,none,no,no,live,mined,
+ev_00153,ufc258_barber_grasso,374.57,375.24,hard_negative,none,yes,no,live,mined,clean inside kick
+ev_00154,ufc258_barber_grasso,415.62,416.15,hard_negative,blue,yes,no,live,mined,clean knee up the middle
+ev_00155,ufc258_barber_grasso,517,518,clean,none,no,no,live,mined,
+ev_00156,ufc258_barber_grasso,543,544,clean,none,no,no,live,mined,
+ev_00157,ufc258_barber_grasso,553.5,554.5,clean,none,no,no,live,mined,
+ev_00158,ufc258_barber_grasso,639,640,clean,none,no,no,live,mined,
+ev_00159,ufc258_barber_grasso,651.5,652.5,clean,none,no,no,live,mined,
+ev_00160,ufc258_barber_grasso,670.25,671.25,clean,none,no,no,live,mined,
+ev_00161,ufc258_barber_grasso,699.25,700.25,clean,none,no,no,live,mined,
+ev_00162,ufc258_barber_grasso,722.5,723.5,clean,none,no,no,live,mined,
+ev_00163,ufc258_barber_grasso,814.5,815.5,clean,none,no,no,live,mined,
+ev_00164,ufc258_barber_grasso,867.75,868.75,clean,none,no,no,live,mined,
+ev_00165,ufc258_barber_grasso,937.17,937.9,hard_negative,blue,yes,no,live,mined,clean knee
+ev_00166,ufc258_barber_grasso,962.76,962.76,clean,none,no,no,live,mined,
+ev_00167,ufc258_barber_grasso,980.25,981.25,clean,none,no,no,live,mined,
+ev_00168,ufc258_barber_grasso,1031.25,1032.25,clean,none,no,no,live,mined,
+ev_00169,ufc299_omalley_vera,75,76,clean,none,no,no,live,mined,
+ev_00170,ufc299_omalley_vera,85.15,88.45,open_hand,red,no,no,live,mined,multiple open hands extended
+ev_00171,ufc299_omalley_vera,329.25,330.25,clean,none,no,no,live,mined,
+ev_00172,ufc299_omalley_vera,420,421,clean,none,no,no,live,mined,
+ev_00173,ufc299_omalley_vera,499.13,501.63,open_hand,red,no,no,live,mined,multiple open hands extended
+ev_00174,ufc299_omalley_vera,553.25,554.25,clean,none,no,no,live,mined,
+ev_00175,ufc299_omalley_vera,600.25,601.25,clean,none,no,no,live,mined,
+ev_00176,ufc299_omalley_vera,634.75,635.75,clean,none,no,no,live,mined,
+ev_00177,ufc299_omalley_vera,818.75,819.75,clean,none,no,no,live,mined,
+ev_00178,ufc299_omalley_vera,936,937,clean,none,no,no,live,mined,
+ev_00179,ufc299_omalley_vera,966.5,967.5,clean,none,no,no,live,mined,
+ev_00180,ufc299_omalley_vera,996.26,997.86,open_hand,red,no,no,live,mined,
+ev_00181,ufc299_omalley_vera,1034.5,1035.5,clean,none,no,no,live,mined,
+ev_00182,ufc299_omalley_vera,1080,1081,clean,none,no,no,live,mined,
+ev_00183,ufc299_omalley_vera,1097,1098,clean,none,no,no,live,mined,
+ev_00184,ufc299_omalley_vera,1252.5,1253.5,clean,none,no,no,live,mined,
+ev_00185,ufc299_omalley_vera,1321,1322,clean,none,no,no,live,mined,
+ev_00186,ufc299_omalley_vera,1382.25,1383.25,clean,none,no,no,live,mined,
+ev_00187,ufc299_omalley_vera,1419.5,1420.5,clean,none,no,no,live,mined,
+ev_00188,ufc299_omalley_vera,1544.75,1545.75,clean,none,no,no,live,mined,
+ev_00189,ufc299_omalley_vera,1544.75,1545.75,clean,none,no,no,live,mined,
+ev_00190,ufc299_omalley_vera,1544.75,1545.75,clean,none,no,no,live,mined,
