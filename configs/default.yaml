@@ -234,3 +234,31 @@ mining:
     weights: {guard: 1.0, pause: 1.0, ref: 1.0, eye: 1.0, groin: 1.0, bend: 1.0, closeup: 1.0}
     guard_before_s: 3.0
     onset_back_s: 0.5
+
+# 2.3 dataset builder: labels/events.csv + the keypoint cache -> training windows (an index;
+# features come in 3.2). Times are seconds of the original video.
+dataset:
+  out: data/dataset/windows.parquet
+  summary: outputs/dataset/summary.md
+  window_s: 2.0              # window length
+  pos_stride_s: 0.25         # stride for windows on a labeled event (fouls, open hands, hard negs)
+  neg_stride_s: 0.5          # stride for clean windows
+  pos_min_overlap: 0.5       # share of the event span that must be inside a window to label it
+  # Windows touching an event's span +- this that aren't its own label are dropped (windup and
+  # reaction are neither the event nor clean).
+  buffer_s: {eye_poke: 2.0, low_blow: 2.0, open_hand: 1.0, hard_negative: 1.0}
+  priority: [eye_poke, low_blow, open_hand, hard_negative]   # when one window fits two events
+  hard_neg_weight: 3.0
+  # Reviewed regions = each labeled item's clip [t - pad_before_s, t + pad_after_s] in these
+  # queues (data/queues/<name>.csv, when present). Fights with full_fight labels: whole window.
+  queues: [mined, hardneg, random]
+  # Clean rows by note (case-insensitive whole-word keywords, first match wins). `use`:
+  # exclude = the clip gives no windows; hard_negative = its clip is a hard negative; clean.
+  note_categories:
+    - {name: replay, use: exclude, keywords: [replay]}
+    - {name: foul timeout, use: exclude, keywords: [foul timeout, after foul, recovery, waved off]}
+    - {name: round break, use: exclude, keywords: [round break]}
+    - {name: other stoppage, use: exclude, keywords: [other]}
+    - {name: stoppage, use: hard_negative, keywords: [cut, ref warning, slip, glove touch]}
+  odd_length_s: [0.2, 3.0]   # audit: fouls / open hands outside this length are flagged
+  known_match_s: 2.0         # audit: a label within this of a known foul's live_s matches it

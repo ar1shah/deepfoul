@@ -1074,6 +1074,63 @@ def pd_read_meta(path):
     return read_meta(path)
 
 
+@app.command("build-dataset")
+def build_dataset(
+    sheet: bool = typer.Option(False, "--sheet", help="Also write contact sheets (middle frame) "
+                               "of the window nearest each event + 15 random clean windows."),
+) -> None:
+    """labels/events.csv + the keypoint cache -> training windows (data/dataset/windows.parquet)
+    and outputs/dataset/summary.md. Test fights never get a window."""
+    from deepfoul.dataset.build import audit, build
+    from deepfoul.dataset.report import write_summary
+    from deepfoul.dataset.windows import coverage_arrays
+    from deepfoul.io.fetch import read_fights
+    from deepfoul.labeling.queues import load_queue, queue_path, read_csv
+
+    cfg = load_config()
+    d, labels = cfg["dataset"], cfg["paths"]["labels"]
+    fights = {f["fight_id"].strip(): f for f in read_fights(labels / "fights.csv")}
+    events = read_csv(labels / "events.csv")
+    items = []
+    for name in d["queues"]:
+        p = queue_path(cfg, name)
+        if p.is_file():
+            items += load_queue(p)
+            typer.echo(f"reviewed clips from queue {name}: {p.name}")
+    if not items:
+        typer.secho("no queue files in data/queues: run `deepfoul mine --all` first, or clean "
+                    "windows come only from full-fight labels", fg="yellow")
+    kp = cfg["paths"]["keypoints"]
+    b = build(events, fights, items, cfg, coverage_fn=lambda fid: coverage_arrays(kp, fid))
+    out = cfg["root"] / d["out"]
+    out.parent.mkdir(parents=True, exist_ok=True)
+    b.windows.to_parquet(out, index=False)
+    kept = [e for e in events if e["fight_id"] not in b.dropped_test]
+    warnings = audit(kept, read_csv(labels / "notes" / "known_fouls.csv"), b.clips, d)
+    summary = cfg["root"] / d["summary"]
+    write_summary(summary, b, kept, warnings, d)
+    counts = b.windows.groupby(["split", "label"]).size()
+    for (split, lab_), n in counts.items():
+        typer.echo(f"  {split:5} {lab_:14} {n}")
+    typer.echo(f"{len(b.windows)} windows -> {out}")
+    typer.echo(f"summary -> {summary} ({len(warnings)} audit warnings)")
+    if sheet:
+        from deepfoul.dataset.report import write_window_sheet
+        df = b.windows
+        ev = df[df["source_kind"] == "event"].copy()
+        mids = {e["event_id"]: (float(e["start_s"]) + float(e["end_s"])) / 2 for e in kept}
+        ev["dist"] = ((ev["t0"] + ev["t1"]) / 2 - ev["event_id"].map(mids)).abs()
+        best = ev.sort_values("dist").drop_duplicates("event_id").sort_values(["fight_id", "t0"])
+        sheets = {"positives": best[best["label"] != "hard_negative"],
+                  "hard_negatives": best[best["label"] == "hard_negative"],
+                  "clean": df[df["label"] == "clean"].sample(15, random_state=0)
+                  .sort_values(["fight_id", "t0"])}
+        for name, w in sheets.items():
+            p = summary.parent / f"sheet_{name}.jpg"
+            n = write_window_sheet(cfg["paths"]["raw"], w, p)
+            typer.echo(f"sheet {name}: {n} windows -> {p}")
+
+
 @app.command()
 def label(
     queue: str = typer.Option(None, "--queue", help="Queue name in data/queues/ (default: practice)."),
