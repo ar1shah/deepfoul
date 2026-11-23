@@ -17,8 +17,9 @@ Ari's video notes. Format: window in video, then foul timestamps (blue to red me
 - ufc276_munhoz_omalley (e6DTwSONguQ): window 02:19-14:08. Eye poke 12:07 blue to red, ref paused, clear live. Replay from 12:29.
 - ufcfn20241214_kape_silva (haL_EjK7rVo): window 0:10-15:28. Low blows 02:45 and 07:54 blue to red, ref paused, clear live, replays from 03:02 and 08:18. Eye poke 13:33 blue to red, no pause, clear but quick, no replay.
 - ufc300_gaethje_holloway (DdgEbBpPD_4): window 0:19-27:02. Eye poke 07:10 blue to red, ref paused, clearer in replay (replay starts 07:27, clear at 07:30). Eye poke 09:38 blue to red, ref paused, not clear live but very clear in replay (replay starts 09:55, clear at 9:58).
-- ufcfn20210313_edwards_muhammad (Vzkfrw6GKfA): window 02:32-10:32. Eye poke 09:06 red to blue, ref paused, not clear live but clear in replay (replay starts 09:24, clear at 09:28). Low quality video.
-- Clean (no fouls, no issues): Garry-Prates yruaaEGyxdg 0:44-26:38. Magomedov-Petrosyan m8Lngrf6ijQ 0:10-11:30. Jandiroba-Dern DKmdkjrZT0g 0:40-26:07. Barber-Grasso aDXmHMQE1-A 2:00-17:21. O'Malley-Vera OY_ISlQoCvI 0:33-26:00.
+- ufcfn20210313_edwards_muhammad (Vzkfrw6GKfA): window 02:32-10:32. Eye poke 09:06 red to blue, ref paused, not clear live but clear in replay (replay starts 09:24, clear at 09:28). Low quality video. Also a low blow 02:56 blue to red, ref paused (found while labeling the mined queue in 2.3).
+- ufc308_magomedov_petrosyan (m8Lngrf6ijQ): window 0:10-11:30. Listed as clean at 0.2, but labeling the mined queue in 2.3 found 4 low blows: 06:17 blue to red (offender being confirmed), 07:57 blue to red (contact unsure), 09:15 red to blue, 10:04 blue to red. Ref paused for all four.
+- Clean (no fouls, no issues): Garry-Prates yruaaEGyxdg 0:44-26:38. Jandiroba-Dern DKmdkjrZT0g 0:40-26:07. Barber-Grasso aDXmHMQE1-A 2:00-17:21. O'Malley-Vera OY_ISlQoCvI 0:33-26:00.
 
 ## Corners (UFC.com event pages, red | blue)
 
