@@ -262,3 +262,20 @@ dataset:
     - {name: stoppage, use: hard_negative, keywords: [cut, ref warning, slip, glove touch]}
   odd_length_s: [0.2, 3.0]   # audit: fouls / open hands outside this length are flagged
   known_match_s: 2.0         # audit: a label within this of a known foul's live_s matches it
+
+# 2.3 hard-negative queue (`deepfoul mine --hardneg`): a strike lands near a foul zone and no
+# stoppage follows. Distances in torso lengths (mean of both fighters).
+hardneg:
+  per_zone: {face: 8, groin: 7}   # candidates per train fight
+  head_r: 0.6               # hand point this close to the opponent's head centre = 0 proximity
+  groin_r: 0.6              # knee / ankle / foot point this close to the opponent's hip midpoint
+  speed_ref: 6.0            # point speed (torso lengths / s) that gives the full speed score
+  open_min: 0.35            # median fingertip-to-hand-wrist over torso above this = extended hand
+  stop_after_s: 5.0         # no stoppage: the guard signal stays under stop_max for this long
+  stop_max: 0.3
+  gap_s: 10.0               # from each other, labeled events, known fouls and other queue items
+
+# 2.3 random queue (`deepfoul mine --random`): unbiased moments for clean labels.
+random_queue:
+  per_fight: 10
+  seed: 0

@@ -994,9 +994,19 @@ def mine(
                                "known-foul recall check (in memory, never queued)."),
     sheets: bool = typer.Option(True, "--sheets/--no-sheets", help="Top-candidate contact "
                                 "sheets (ffmpeg, a few seconds per fight)."),
+    hardneg: bool = typer.Option(False, "--hardneg", help="Instead: the hard-negative queue "
+                                 "(strikes near the face / groin with no stoppage after), every "
+                                 "train fight -> data/queues/hardneg.csv."),
+    random_: bool = typer.Option(False, "--random", help="Instead: the random queue (unbiased "
+                                 "moments for clean labels), every train fight -> "
+                                 "data/queues/random.csv."),
 ) -> None:
     """Stoppage finder: rank candidate foul moments from the keypoint cache into label queues."""
     import csv
+
+    if hardneg or random_:
+        _side_queue("hardneg" if hardneg else "random", sheets)
+        return
 
     from deepfoul.io.fights import window
     from deepfoul.labeling.queues import write_queue
@@ -1067,6 +1077,67 @@ def mine(
     write_report(odir / "report.md", results, len(items), extra, mcfg["per_fight"])
     typer.echo(f"mined.csv: {len(items)} items ({len(extra)} extra) -> {qdir / 'mined.csv'}")
     typer.echo(f"report: {odir / 'report.md'}")
+
+
+def _side_queue(kind: str, sheets: bool) -> None:
+    """mine --hardneg / --random: one queue over every cached train fight, away from labeled
+    events, known fouls and the other queues' items."""
+    import csv
+
+    import pandas as pd
+
+    from deepfoul.io.fights import window
+    from deepfoul.labeling.queues import load_queue, read_csv, write_queue
+    from deepfoul.mining import hardneg as hn
+    from deepfoul.mining.report import write_top_sheet
+    from deepfoul.mining.signals import compute_signals
+    from deepfoul.perception.extract import keypoints_paths, read_meta
+
+    cfg = load_config()
+    labels, qdir = cfg["paths"]["labels"], cfg["paths"]["queues"]
+    events = read_csv(labels / "events.csv")
+    with (labels / "notes" / "known_fouls.csv").open(newline="", encoding="utf-8") as f:
+        fouls = list(csv.DictReader(f))
+    others = [q for q in ("mined", "hardneg", "random") if q != kind]
+    other_items = [it for q in others if (qdir / f"{q}.csv").exists()
+                   for it in load_queue(qdir / f"{q}.csv")]
+    h, rq = cfg["hardneg"], cfg["random_queue"]
+    items, odir = [], cfg["paths"]["outputs"] / "mining"
+    for r in _fight_rows([], None):
+        fid = r["fight_id"].strip()
+        kp = keypoints_paths(cfg["paths"]["keypoints"], fid)["boxes"]
+        if r["split"].strip() != "train" or not kp.exists():
+            continue
+        w0, w1 = window(r)
+        w = (w0 or 0.0, w1 if w1 is not None else float(read_meta(kp)["window"][1]))
+        avoid = [float(e[k]) for e in events if e["fight_id"] == fid for k in ("start_s", "end_s")]
+        avoid += [float(f[k]) for f in fouls if f["fight_id"] == fid
+                  for k in ("live_s", "replay_s") if (f.get(k) or "").strip()]
+        avoid += [it["t_s"] for it in other_items if it["fight_id"] == fid]
+        if kind == "random":
+            cands = hn.random_items(fid, w, avoid, rq["per_fight"], h["gap_s"], rq["seed"])
+            items += hn.queue_items(fid, cands, "rnd")
+            typer.echo(f"{fid}: {len(cands)} random moments")
+            continue
+        df = pd.read_parquet(kp, columns=["t", "shot_id", "track_id", "corner", "x1", "y1", "x2",
+                                          "y2", "kpts", "kpt_scores", "torso_len", "score"],
+                             filters=[("t", ">=", w[0]), ("t", "<", w[1])])
+        frames = hn.strike_frames(df, cfg["kpt_conf_min"], h)
+        guard = compute_signals(df, w[0], w[1], cfg["mining"], cfg["kpt_conf_min"],
+                                cfg["lookahead_s"])[["t", "guard"]]
+        cands = hn.candidates(frames, guard, w, avoid, h, cfg["mining"]["step_s"])
+        items += hn.queue_items(fid, sorted(cands, key=lambda c: c["t_s"]), "hn")
+        if sheets:
+            write_top_sheet(cfg["paths"]["raw"] / f"{fid}.mp4", cands, 0.0,
+                            odir / f"hardneg_{fid}.jpg")
+        zones = [c["reason"].split(" · ")[0] for c in cands]
+        typer.echo(f"{fid}: {len(cands)} candidates ({zones.count('strike at face')} face, "
+                   f"{zones.count('strike at groin')} groin)")
+    out = qdir / f"{kind}.csv"
+    write_queue(items, out)
+    typer.echo(f"{kind}.csv: {len(items)} items -> {out}"
+               + (f"; sheets in {odir}" if kind == "hardneg" and sheets else ""))
+    typer.echo(f"label with `uv run deepfoul label --queue {kind}`")
 
 
 def pd_read_meta(path):
