@@ -16,6 +16,10 @@ from pathlib import Path
 from deepfoul.io.fights import window
 
 QUEUE_COLS = ["item_id", "fight_id", "t_s", "score", "reason"]
+# An edit queue (e.g. relabel) also lists existing events to fix: `event_ids` = "ev_1;ev_2".
+# Its items are done when they're saved or deleted on (<name>.done.json), not by overlap,
+# because every item already overlaps a label.
+EDIT_COL = "event_ids"
 
 
 def queue_path(cfg: dict, name: str) -> Path:
@@ -29,17 +33,28 @@ def read_csv(path: Path) -> list[dict[str, str]]:
 
 def write_queue(items: list[dict], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    cols = QUEUE_COLS + ([EDIT_COL] if any(EDIT_COL in it for it in items) else [])
     with path.open("w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, QUEUE_COLS, lineterminator="\n")
+        w = csv.DictWriter(f, cols, lineterminator="\n")
         w.writeheader()
-        w.writerows({c: it.get(c, "") for c in QUEUE_COLS} for it in items)
+        for it in items:
+            row = {c: it.get(c, "") for c in cols}
+            if isinstance(row.get(EDIT_COL), list):
+                row[EDIT_COL] = ";".join(row[EDIT_COL])
+            w.writerow(row)
 
 
 def load_queue(path: Path) -> list[dict]:
     items = read_csv(path)
     for it in items:
         it["t_s"] = float(it["t_s"])
+        if EDIT_COL in it:
+            it[EDIT_COL] = [e.strip() for e in (it[EDIT_COL] or "").split(";") if e.strip()]
     return items
+
+
+def is_edit_queue(items: list[dict]) -> bool:
+    return bool(items) and EDIT_COL in items[0]
 
 
 def golden_t(clip: dict[str, str], fouls: list[dict[str, str]]) -> float:

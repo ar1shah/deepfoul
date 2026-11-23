@@ -1091,8 +1091,8 @@ def label(
 
     from deepfoul.io.fetch import read_fights
     from deepfoul.labeling.app import create_app
-    from deepfoul.labeling.queues import (build_practice_queue, load_queue, queue_path,
-                                          read_csv, write_queue)
+    from deepfoul.labeling.queues import (build_practice_queue, is_edit_queue, load_queue,
+                                          queue_path, read_csv, write_queue)
 
     cfg = load_config()
     lab = cfg["labeling"]
@@ -1100,7 +1100,7 @@ def label(
     if queue and fight:
         raise typer.BadParameter("give --queue or --fight, not both")
     fights = {f["fight_id"].strip(): f for f in read_fights(labels / "fights.csv")}
-    items, skips_path, widen_path = None, None, None
+    items, skips_path, widen_path, done_path = None, None, None, None
     if fight:
         if fight not in fights:
             raise typer.BadParameter(f"unknown fight_id {fight!r}")
@@ -1128,6 +1128,10 @@ def label(
         items = load_queue(qpath)
         skips_path = qpath.with_suffix(".skips.json")
         widen_path = qpath.with_suffix(".widen.json")
+        if is_edit_queue(items):
+            done_path = qpath.with_suffix(".done.json")
+            typer.echo("edit queue: each item opens its listed event for editing; it's done "
+                       "once you save or delete on it")
         mode = "queue"
     events_path = (events if events else default_events).resolve()
     if events_path == (labels / "events.csv").resolve():
@@ -1138,7 +1142,7 @@ def label(
     typer.echo(f"{mode}: {queue or fight} -> {events_path}")
     typer.echo(f"open {url} in Chrome or Edge (Ctrl+C stops)")
     app_ = create_app(cfg, events_path, mode, queue=items, queue_name=queue, fight_id=fight,
-                      skips_path=skips_path, widen_path=widen_path)
+                      skips_path=skips_path, widen_path=widen_path, done_path=done_path)
     if not no_browser:
         import threading
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()

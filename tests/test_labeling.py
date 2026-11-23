@@ -14,8 +14,8 @@ from deepfoul.io.fights import window
 from deepfoul.labeling.app import create_app
 from deepfoul.labeling.events_store import (EVENT_COLS, EventStore, default_source,
                                             validate_event)
-from deepfoul.labeling.queues import (Skips, build_practice_queue, done_items, golden_t, item_done,
-                                      load_queue, read_csv, write_queue)
+from deepfoul.labeling.queues import (Skips, build_practice_queue, done_items, golden_t,
+                                      is_edit_queue, item_done, load_queue, read_csv, write_queue)
 
 CFG = load_config()
 LABELS = CFG["paths"]["labels"]
@@ -134,8 +134,11 @@ def test_practice_queue_contents():
     reasons = [it["reason"] for it in items]
     for g in GOLDEN:
         assert any(r.startswith(g["event_id"] + " ") for r in reasons)
-    assert sum(r.startswith("known foul") for r in reasons) == 6
-    assert sum(r == "random" for r in reasons) == 18
+    # every train known foul not already a golden clip is in (6 at 0.2, 11 after 2.3's finds);
+    # random moments fill the rest
+    n_golden = sum(not r.startswith("known foul") and r != "random" for r in reasons)
+    n_known = sum(r.startswith("known foul") for r in reasons)
+    assert n_known >= 6 and n_golden + n_known + sum(r == "random" for r in reasons) == 30
     assert _practice() == items and _practice(seed=1) != items
 
 
@@ -319,3 +322,77 @@ def test_api_skip_reason(qclient):
     it = qclient.get("/api/session").json()["items"][1]
     assert (it["status"], it["skip_reason"]) == ("skipped", "replay")
     assert qclient.get("/api/events").json() == []        # nothing written to events.csv
+
+
+# ---------- edit queues (2.3 relabel) ----------
+def test_edit_queue_file_round_trip(tmp_path):
+    p = tmp_path / "relabel.csv"
+    write_queue([{"item_id": "r_01", "fight_id": FID, "t_s": 600.0, "score": "",
+                  "reason": "dup -> delete one", "event_ids": ["ev_00001", "ev_00002"]}], p)
+    back = load_queue(p)
+    assert back[0]["event_ids"] == ["ev_00001", "ev_00002"] and is_edit_queue(back)
+    assert not is_edit_queue(_q(600.0))
+
+
+@pytest.fixture
+def eclient(tmp_path):
+    cfg = {**CFG, "paths": {**CFG["paths"], "raw": tmp_path / "raw"}}
+    (tmp_path / "raw").mkdir()
+    (tmp_path / "raw" / f"{FID}.mp4").write_bytes(b"0" * 64)
+    store = EventStore(tmp_path / "events.csv")
+    a = store.add(row(start_s=600.0, end_s=601.0, foul_type="clean", offender="none", contact="no"))
+    b = store.add(row(start_s=600.0, end_s=601.0, foul_type="clean", offender="none", contact="no"))
+    c = store.add(row(start_s=640.0, end_s=640.0, foul_type="clean", offender="none", contact="no"))
+    queue = [{"item_id": "r_01", "fight_id": FID, "t_s": 600.5, "score": "", "reason": "dup",
+              "event_ids": [a["event_id"], b["event_id"]]},
+             {"item_id": "r_02", "fight_id": FID, "t_s": 635.0, "score": "", "reason": "outside",
+              "event_ids": [c["event_id"]]}]
+    app = create_app(cfg, tmp_path / "events.csv", "queue", queue=queue, queue_name="relabel",
+                     skips_path=tmp_path / "r.skips.json", widen_path=tmp_path / "r.widen.json",
+                     done_path=tmp_path / "r.done.json", warm_probe=False)
+    return TestClient(app), (a, b, c), tmp_path
+
+
+def test_edit_queue_todo_despite_labels_then_done(eclient):
+    client, (a, b, c), tmp = eclient
+    s = client.get("/api/session").json()
+    assert s["edit_queue"] is True
+    st = {it["item_id"]: it for it in s["items"]}
+    # both items overlap labels, but an edit queue isn't closed by overlap
+    assert (st["r_01"]["status"], st["r_02"]["status"]) == ("todo", "todo")
+    assert st["r_01"]["event_ids"] == [a["event_id"], b["event_id"]]
+    assert st["r_02"]["events_span"] == [640.0, 640.0]      # the page widens its clip to this
+    # delete the duplicate, then mark the item done (what the page does after a delete)
+    assert client.delete(f"/api/events/{b['event_id']}").status_code == 200
+    assert client.post("/api/done/r_01", json={"done": True}).json()["done"] is True
+    # a PUT on the other item, then done
+    r = client.put(f"/api/events/{c['event_id']}",
+                   json=row(start_s=634.5, end_s=635.5, foul_type="clean", offender="none",
+                            contact="no"))
+    assert r.status_code == 200
+    client.post("/api/done/r_02", json={})
+    st = {it["item_id"]: it for it in client.get("/api/session").json()["items"]}
+    assert (st["r_01"]["status"], st["r_02"]["status"]) == ("done", "done")
+    assert st["r_01"]["events_span"] == [600.0, 601.0]       # only the remaining event
+    assert (tmp / "r.done.json").is_file()
+    assert client.post("/api/done/nope", json={}).status_code == 404
+
+
+def test_done_endpoint_only_for_edit_queues(qclient):
+    assert qclient.get("/api/session").json()["edit_queue"] is False
+    assert qclient.post("/api/done/q_01", json={}).status_code == 404
+
+
+def test_delete_then_undo_restores_the_row(eclient):
+    # undo of a delete = POST the same values back (the page does this); new id, same fields
+    client, (a, b, c), _ = eclient
+    gone = client.delete(f"/api/events/{a['event_id']}").json()["event"]
+    back = client.post("/api/events", json={k: v for k, v in gone.items() if k != "event_id"}).json()
+    ev = back["event"]
+    assert ev["event_id"] != a["event_id"]
+    assert {k: ev[k] for k in EVENT_COLS if k != "event_id"} == \
+           {k: a[k] for k in EVENT_COLS if k != "event_id"}
+
+
+def test_quick_reasons_include_foul_timeout():
+    assert CFG["labeling"]["clean_reasons"][6] == "foul timeout"

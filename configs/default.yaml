@@ -185,9 +185,10 @@ labeling:
   scrub_s: 0.5              # arrow step (2.2, after the practice run)
   scrub_big_s: 2.0          # Shift + arrow step
   widen_s: 4.0              # W widens the current clip by this on each side (repeatable)
-  # Quick reasons: one key = clean + this note (6 7 8 9, Shift+6, Shift+7). Clean stoppages with
-  # a reason other than "round break" / "other" can serve as hard negatives in 2.3.
-  clean_reasons: [cut, ref warning, slip, glove touch, round break, other]
+  # Quick reasons: one key = clean + this note (6 7 8 9, Shift+6, Shift+7, Shift+8). Clean
+  # stoppages with cut / ref warning / slip / glove touch are hard negatives in 2.3; round break,
+  # foul timeout and other aren't (see dataset.note_categories).
+  clean_reasons: [cut, ref warning, slip, glove touch, round break, other, foul timeout]
   replay_skip_reason: replay  # 0 skips the item with this reason: a replay is never saved as clean
 
 pose:

@@ -126,6 +126,8 @@ async function gotoItem(i, { play = true } = {}) {
   try { await loadFight(it.fight_id); } finally { S.loading = false; }
   setClip(it);
   S.draft = blankDraft();
+  const listed = editEvents(it);
+  if (listed.length) S.draft = draftFrom(listed[0]);
   // the mined reason (signal names) says what to look for; the practice queue's would give
   // its answers away, so it stays hidden there
   const why = S.session.queue_name !== "practice" && it.reason ? ` · ${it.reason}` : "";
@@ -134,12 +136,36 @@ async function gotoItem(i, { play = true } = {}) {
   if (play) video.play().catch(() => {});
   preloadNext();
   renderAll();
+  if (it.event_ids) {
+    const gone = it.event_ids.filter((id) => !S.events.some((e) => e.event_id === id));
+    msg(listed.length ? `Editing ${listed[0].event_id}` +
+        (listed.length > 1 ? ` (also listed: ${listed.slice(1).map((e) => e.event_id).join(", ")})` : "") +
+        `. Fix: ${it.reason}` + (gone.length ? ` · already deleted: ${gone.join(", ")}` : "")
+        : `Listed events are all deleted. Fix: ${it.reason}`, "warn");
+  }
+}
+
+// Edit queues (relabel): the item's listed events that still exist, in the listed order.
+function editEvents(it) {
+  if (!it || !it.event_ids) return [];
+  return it.event_ids.map((id) => S.events.find((e) => e.event_id === id)).filter(Boolean);
+}
+function draftFrom(ev) { return { ...ev, start_s: parseFloat(ev.start_s), end_s: parseFloat(ev.end_s) }; }
+async function markDone() {
+  if (!S.session.edit_queue || S.idx < 0) return;
+  const it = S.items[S.idx];
+  await api("POST", `/api/done/${it.item_id}`, { done: true });
+  it.status = "done";
 }
 
 function setClip(it) {
   const extra = (it.widen || 0) * S.cfg.widen_s;
   S.clipStart = it.t_s - S.cfg.pad_before_s - extra;
   S.clipEnd = it.t_s + S.cfg.pad_after_s + extra;
+  if (it.events_span) {  // edit queue: the listed events are always inside the clip
+    S.clipStart = Math.min(S.clipStart, it.events_span[0] - S.cfg.default_event_pad_s);
+    S.clipEnd = Math.max(S.clipEnd, it.events_span[1] + S.cfg.default_event_pad_s);
+  }
 }
 
 async function widen() {
@@ -214,7 +240,7 @@ function setEnd() {
 }
 
 function loadEvent(ev) {
-  S.draft = { ...ev, start_s: parseFloat(ev.start_s), end_s: parseFloat(ev.end_s) };
+  S.draft = draftFrom(ev);
   seek(S.draft.start_s);
   renderAll();
   msg(`Editing ${ev.event_id}. Enter saves the change.`, "warn");
@@ -239,6 +265,7 @@ async function save(next) {
     msg(`${d.event_id ? "Updated" : "Saved"} ${ev.event_id}: ${NAMES[ev.foul_type]} ` +
         `${ev.offender} ${fmt(+ev.start_s)}-${fmt(+ev.end_s)}${warn}`, warn ? "warn" : "ok");
     if (S.session.mode === "queue" && S.idx >= 0) S.items[S.idx].status = "done";
+    await markDone();
     await refreshEvents();
     if (next && S.session.mode === "queue") {
       await gotoItem(nextTodo(S.idx));
@@ -253,9 +280,43 @@ async function save(next) {
   }
 }
 
+async function deleteEvent() {
+  const d = S.draft;
+  if (!d || !d.event_id) { msg("Nothing to delete: load an event first (click it, or open a relabel item).", "warn"); return; }
+  const ev = S.events.find((x) => x.event_id === d.event_id);
+  if (!ev) return;
+  S.saving = true;
+  try {
+    await api("DELETE", `/api/events/${ev.event_id}`);
+    S.undo.push({ deleted: ev, idx: S.idx });
+    await markDone();
+    await refreshEvents();
+    const rest = editEvents(S.session.mode === "queue" && S.idx >= 0 ? S.items[S.idx] : null);
+    S.draft = rest.length ? draftFrom(rest[0]) : blankDraft();
+    renderAll();
+    msg(`deleted ${ev.event_id}, U to undo` + (rest.length ? ` · now editing ${rest[0].event_id}` : ""), "warn");
+  } catch (e) {
+    msg(`Not deleted: ${e.message}`, "err");
+  } finally {
+    S.saving = false;
+  }
+}
+
 async function undo() {
   const last = S.undo.pop();
   if (!last) { msg("Nothing to undo.", "warn"); return; }
+  if (last.deleted) {  // undo a delete: add the row back (it gets a new id)
+    let ev;
+    try {
+      const { event_id, ...row } = last.deleted;
+      ev = (await api("POST", "/api/events", row)).event;
+    } catch (e) { msg(`Undo failed: ${e.message}`, "err"); return; }
+    await refreshEvents();
+    S.draft = draftFrom(ev);
+    renderAll();
+    msg(`Restored ${last.deleted.event_id} as ${ev.event_id}.`, "warn");
+    return;
+  }
   if (last.prev) {  // undo an edit: put the old values back
     try {
       const { event_id, ...row } = last.prev;
@@ -455,6 +516,7 @@ $("quick").addEventListener("click", (e) => {
   const b = e.target.closest("button");
   if (b) quickReason(+b.dataset.i);
 });
+$("delete-ev").addEventListener("click", () => deleteEvent());
 $("new-draft").addEventListener("click", () => { S.draft = blankDraft(); renderAll(); msg(""); });
 $("help-btn").addEventListener("click", () => $("help").classList.toggle("hidden"));
 $("help").addEventListener("click", () => $("help").classList.add("hidden"));
@@ -476,8 +538,8 @@ document.addEventListener("keydown", (e) => {
     return;
   }
   let handled = true;
-  // quick reasons by physical key: 6 7 8 9, Shift+6, Shift+7 (Shift+digit types ^ & on US)
-  const QUICK = e.shiftKey ? { Digit6: 4, Digit7: 5 } : { Digit6: 0, Digit7: 1, Digit8: 2, Digit9: 3 };
+  // quick reasons by physical key: 6 7 8 9, Shift+6 7 8 (Shift+digit types ^ & * on US)
+  const QUICK = e.shiftKey ? { Digit6: 4, Digit7: 5, Digit8: 6 } : { Digit6: 0, Digit7: 1, Digit8: 2, Digit9: 3 };
   if (e.code in QUICK) { quickReason(QUICK[e.code]); e.preventDefault(); return; }
   if (e.code === "Digit0" && !e.shiftKey) { skip(S.cfg.replay_skip_reason); e.preventDefault(); return; }
   if (FOUL_KEYS[k]) setFoul(FOUL_KEYS[k]);
@@ -499,6 +561,7 @@ document.addEventListener("keydown", (e) => {
   else if (k === "Enter") save(!e.shiftKey);
   else if (k === "s" || k === "S") skip();
   else if (k === "u" || k === "U") undo();
+  else if (k === "Delete" || k === "Backspace") deleteEvent();   // Mac's delete key = Backspace
   else if (k === "n" || k === "N") $("notes").focus();
   else if (k === "?") $("help").classList.toggle("hidden");
   else if (k === "Escape") $("help").classList.add("hidden");
@@ -518,7 +581,7 @@ async function start() {
   S.cfg = S.session.config;
   S.items = S.session.items;
   $("events-path").textContent = S.session.events_path;
-  const QK = ["6", "7", "8", "9", "⇧6", "⇧7"];
+  const QK = ["6", "7", "8", "9", "⇧6", "⇧7", "⇧8"];
   $("quick").innerHTML = (S.cfg.clean_reasons || []).slice(0, QK.length)
     .map((r, i) => `<button data-i="${i}"><kbd>${QK[i]}</kbd> ${r}</button>`).join("");
   $("help-quick").textContent = (S.cfg.clean_reasons || []).slice(0, QK.length)

@@ -79,6 +79,7 @@
       <button id="save-stay"><kbd>Shift+Enter</kbd> save + stay</button>
       <button id="skip"><kbd>S</kbd> skip</button>
       <button id="skip-replay"><kbd>0</kbd> replay (skip)</button>
+      <button id="delete-ev"><kbd>Del</kbd> delete event</button>
       <button id="new-draft">clear</button>
     </div>
     <div id="msg" class="msg"></div>
@@ -99,7 +100,7 @@
       <tr><td><kbd>M</kbd></td><td>footage live / slow-mo (label only, not playback)</td></tr>
       <tr><td><kbd>[</kbd> / <kbd>]</kbd></td><td>set start / end at the current frame</td></tr>
       <tr><td><kbd>Space</kbd></td><td>play / pause (after the clip end: replay the clip)</td></tr>
-      <tr><td><kbd>6</kbd>-<kbd>9</kbd>, <kbd>Shift+6</kbd> <kbd>Shift+7</kbd></td><td>clean + a reason note in one key: <span id="help-quick"></span></td></tr>
+      <tr><td><kbd>6</kbd>-<kbd>9</kbd>, <kbd>Shift+6</kbd>-<kbd>Shift+8</kbd></td><td>clean + a reason note in one key: <span id="help-quick"></span></td></tr>
       <tr><td><kbd>0</kbd></td><td>broadcast replay: skip the item (never saved as clean)</td></tr>
       <tr><td><kbd>←</kbd> / <kbd>→</kbd></td><td>scrub <span id="help-scrub"></span> (<kbd>Shift</kbd>: <span id="help-scrub-big"></span>), stops at the clip edges</td></tr>
       <tr><td><kbd>W</kbd></td><td>widen the clip by <span id="help-widen"></span> on each side (again for more)</td></tr>
@@ -108,7 +109,8 @@
       <tr><td><kbd>Enter</kbd></td><td>save and go to the next item now, no need to wait for the clip end (updates a loaded event)</td></tr>
       <tr><td><kbd>Shift+Enter</kbd></td><td>save and stay on this clip</td></tr>
       <tr><td><kbd>S</kbd></td><td>skip this item</td></tr>
-      <tr><td><kbd>U</kbd></td><td>undo the last save (deletes that row, goes back to it)</td></tr>
+      <tr><td><kbd>U</kbd></td><td>undo the last save or delete</td></tr>
+      <tr><td><kbd>Delete</kbd> / <kbd>Backspace</kbd></td><td>delete the event loaded in the form (U brings it back)</td></tr>
       <tr><td><kbd>N</kbd> / <kbd>Esc</kbd></td><td>type a note / leave the note field</td></tr>
       <tr><td><kbd>?</kbd></td><td>this help</td></tr>
     </table>

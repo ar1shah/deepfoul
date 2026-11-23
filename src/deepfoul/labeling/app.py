@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from deepfoul.io.fetch import read_fights
 from deepfoul.io.fights import window
 from deepfoul.labeling.events_store import (EventStore, default_source, validate_event)
-from deepfoul.labeling.queues import LocalMap, Skips, done_items
+from deepfoul.labeling.queues import EDIT_COL, LocalMap, Skips, done_items, is_edit_queue
 
 STATIC = Path(__file__).parent / "static"
 
@@ -24,8 +24,9 @@ STATIC = Path(__file__).parent / "static"
 def create_app(cfg: dict, events_path: Path, mode: str, queue: list[dict] | None = None,
                queue_name: str | None = None, fight_id: str | None = None,
                skips_path: Path | None = None, widen_path: Path | None = None,
-               warm_probe: bool = True) -> FastAPI:
-    """mode 'queue' (queue + queue_name) or 'fight' (fight_id)."""
+               done_path: Path | None = None, warm_probe: bool = True) -> FastAPI:
+    """mode 'queue' (queue + queue_name) or 'fight' (fight_id). An edit queue (items with
+    event_ids) keeps its done items in done_path instead of deriving them from overlap."""
     lab = cfg["labeling"]
     fights = {f["fight_id"].strip(): f for f in read_fights(cfg["paths"]["labels"] / "fights.csv")}
     windows = {fid: window(f) for fid, f in fights.items()}
@@ -34,6 +35,10 @@ def create_app(cfg: dict, events_path: Path, mode: str, queue: list[dict] | None
     skips = Skips(skips_path) if skips_path else None
     widen = LocalMap(widen_path) if widen_path else None
     queue = queue or []
+    edit = is_edit_queue(queue)
+    if edit and done_path is None:
+        raise ValueError("an edit queue needs done_path")
+    done_map = LocalMap(done_path) if edit else None
     app = FastAPI(title="DeepFoul labeling", docs_url=None, redoc_url=None)
 
     def video_path(fid: str) -> Path:
@@ -66,15 +71,26 @@ def create_app(cfg: dict, events_path: Path, mode: str, queue: list[dict] | None
 
     def items_with_status() -> list[dict]:
         wid = widen.data if widen else {}
-        done = done_items(queue, store.list(), lab["pad_before_s"], lab["pad_after_s"],
-                          lab["widen_s"], wid)
+        events = store.list()
+        if edit:
+            done = set(done_map.data)
+            by_id = {e["event_id"]: e for e in events}
+        else:
+            done = done_items(queue, events, lab["pad_before_s"], lab["pad_after_s"],
+                              lab["widen_s"], wid)
         out = []
         for it in queue:
             iid = it["item_id"]
             status = ("done" if iid in done
                       else "skipped" if skips and iid in skips.ids else "todo")
-            out.append({**it, "status": status, "widen": int(wid.get(iid, 0)),
-                        "skip_reason": skips.data.get(iid, "") if skips else ""})
+            row = {**it, "status": status, "widen": int(wid.get(iid, 0)),
+                   "skip_reason": skips.data.get(iid, "") if skips else ""}
+            if edit:  # the clip also covers the listed events that still exist
+                spans = [(float(by_id[e]["start_s"]), float(by_id[e]["end_s"]))
+                         for e in it[EDIT_COL] if e in by_id]
+                row["events_span"] = ([min(s for s, _ in spans), max(t for _, t in spans)]
+                                      if spans else None)
+            out.append(row)
         return out
 
     @app.get("/")
@@ -84,7 +100,7 @@ def create_app(cfg: dict, events_path: Path, mode: str, queue: list[dict] | None
     @app.get("/api/session")
     def session() -> dict:
         ids = [fight_id] if mode == "fight" else sorted({it["fight_id"] for it in queue})
-        return {"mode": mode, "queue_name": queue_name, "fight_id": fight_id,
+        return {"mode": mode, "queue_name": queue_name, "fight_id": fight_id, "edit_queue": edit,
                 "events_path": str(events_path), "items": items_with_status(),
                 "fights": {fid: fight_info(fid) for fid in ids if fid in fights},
                 "config": {k: lab[k] for k in ("pad_before_s", "pad_after_s", "default_event_pad_s",
@@ -139,6 +155,17 @@ def create_app(cfg: dict, events_path: Path, mode: str, queue: list[dict] | None
         skips.set(item_id, bool(body.get("skipped", True)), str(body.get("reason", "")))
         return {"item_id": item_id, "skipped": item_id in skips.ids,
                 "reason": skips.data.get(item_id, "")}
+
+    @app.post("/api/done/{item_id}")
+    def set_done(item_id: str, body: dict = Body(default={})) -> dict:
+        """Edit queues only: mark an item fixed (the page calls this after a save or delete)."""
+        if done_map is None or item_id not in {it["item_id"] for it in queue}:
+            raise HTTPException(404, f"no edit-queue item {item_id}")
+        if body.get("done", True):
+            done_map.put(item_id, True)
+        else:
+            done_map.drop(item_id)
+        return {"item_id": item_id, "done": item_id in done_map.data}
 
     @app.post("/api/widen/{item_id}")
     def set_widen(item_id: str, body: dict = Body(default={})) -> dict:
