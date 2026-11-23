@@ -1074,6 +1074,99 @@ def pd_read_meta(path):
     return read_meta(path)
 
 
+@app.command()
+def ingest(
+    fight_ids: list[str] = typer.Argument(None, help="Only these fights (default: the draft's "
+                                          "new fights, else every fight in fights.csv)."),
+    draft: Path = typer.Option(None, "--draft", help="Cowork draft to merge first (default: "
+                               "labels/fights_draft.csv if it exists)."),
+    no_extract: bool = typer.Option(False, "--no-extract", help="Fetch only (no GPU)."),
+) -> None:
+    """New fights end to end: merge the draft into fights.csv, fetch, extract, mine.
+
+    Writes outputs/ingest/<date>.md. Every stage skips what's up to date, so it can be re-run.
+    """
+    import csv as _csv
+
+    from deepfoul.ingest import (blockers, cache_stats, merge_draft, queue_info, read_rows,
+                                 run_cli, write_report)
+    from deepfoul.io.fetch import fetch_all
+
+    cfg = load_config()
+    labels, raw, kp = cfg["paths"]["labels"], cfg["paths"]["raw"], cfg["paths"]["keypoints"]
+    qdir = cfg["paths"]["queues"]
+    log = cfg["paths"]["outputs"] / "ingest" / "ingest.log"
+    notes: list[str] = []
+    merged: list[str] = []
+    draft = draft or labels / "fights_draft.csv"
+    if draft.exists():
+        merged, problems = merge_draft(labels / "fights.csv", draft, set(cfg["identity"]["colors"]),
+                                       labels / "notes" / "drafts")
+        if problems:
+            for p in problems:
+                typer.secho(p, fg="red", err=True)
+            typer.secho("draft not merged; fix it and run ingest again", fg="red", err=True)
+            raise typer.Exit(1)
+        typer.echo(f"merged {len(merged)} fights from {draft.name}: {', '.join(merged)}")
+        notes.append(f"Draft archived to labels/notes/drafts/. Commit labels/fights.csv.")
+    rows = {r["fight_id"].strip(): r for r in read_rows(labels / "fights.csv")}
+    targets = list(fight_ids or merged or rows)
+    unknown = [f for f in targets if f not in rows]
+    if unknown:
+        raise typer.BadParameter(f"unknown fight_id(s): {', '.join(unknown)}")
+
+    # 1. fetch
+    fetched = fetch_all([rows[f] for f in targets], raw, cfg["fetch"]["max_height"])
+    status = {f: {"fight_id": f, "split": rows[f]["split"].strip()} for f in targets}
+    for k, ids in fetched.items():
+        for f in ids:
+            status[f]["fetch"] = {"downloaded": "downloaded", "skipped": "had it",
+                                  "failed": "FAILED"}[k]
+    # 2. extract (never test fights here: that's 6.0)
+    ready = []
+    for f in targets:
+        st = status[f]
+        if st["split"] == "test":
+            st["extract"] = "test fight: not extracted (6.0)"
+            continue
+        why = blockers(rows[f], (raw / f"{f}.mp4").exists())
+        if why:
+            st["extract"] = "blocked: " + "; ".join(why)
+        else:
+            ready.append(f)
+    if ready and not no_extract:
+        code = run_cli(["extract", *ready], log)
+        if code:
+            notes.append(f"extract exited with {code}; see outputs/extract_logs/")
+    for f in ready:
+        st = status[f]
+        st["stats"] = cache_stats(kp, f)
+        st["extract"] = ("skipped (--no-extract)" if no_extract and not st["stats"] else
+                         "ok" if st["stats"] else "FAILED (outputs/extract_logs)")
+    # 3. mine train fights whose queue is missing or older than their cache
+    to_mine = [f for f in ready if status[f]["split"] == "train" and status[f]["stats"]
+               and (not (qdir / f"mined_{f}.csv").exists()
+                    or (qdir / f"mined_{f}.csv").stat().st_mtime < (kp / f"{f}.parquet").stat().st_mtime)]
+    if to_mine:
+        code = run_cli(["mine", *to_mine], log)
+        if code:
+            notes.append(f"mine exited with {code}")
+    else:
+        notes.append("Mining: every train queue was up to date; mined.csv not rebuilt.")
+    with (labels / "notes" / "known_fouls.csv").open(newline="", encoding="utf-8") as fh:
+        fouls = list(_csv.DictReader(fh))
+    for f in targets:
+        if status[f]["split"] == "train" and status[f].get("stats"):
+            status[f]["queue"], status[f]["ranks"] = queue_info(
+                qdir, f, fouls, cfg["labeling"]["pad_before_s"])
+    if to_mine:
+        notes.append(f"Mined: {', '.join(to_mine)}. Label them with "
+                     "`uv run deepfoul label --queue mined`.")
+    out = cfg["paths"]["outputs"] / "ingest" / f"{__import__('datetime').date.today()}.md"
+    write_report(out, [status[f] for f in targets], merged, notes)
+    typer.echo(f"ingest report -> {out}")
+
+
 @app.command("build-dataset")
 def build_dataset(
     sheet: bool = typer.Option(False, "--sheet", help="Also write contact sheets (middle frame) "
