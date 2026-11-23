@@ -210,7 +210,10 @@ function nextTodo(from) {
 // ---------- draft ----------
 function effective(d) {
   const pad = S.cfg.default_event_pad_s;
-  const center = S.session.mode === "queue" && S.idx >= 0 ? S.items[S.idx].t_s : S.t;
+  const it = S.session.mode === "queue" && S.idx >= 0 ? S.items[S.idx] : null;
+  // the item's time, unless the clip was moved off it (loadEvent): then the playhead
+  const center = it && S.clipStart != null && it.t_s >= S.clipStart && it.t_s <= S.clipEnd
+    ? it.t_s : S.t;
   return { start: d.start_s != null ? d.start_s : center - pad,
            end: d.end_s != null ? d.end_s : center + pad };
 }
@@ -241,9 +244,19 @@ function setEnd() {
 
 function loadEvent(ev) {
   S.draft = draftFrom(ev);
+  // queue mode: seek() is clamped to the clip, so an event outside it would pin to the clip
+  // edge. Move the clip onto the event instead (clicking the queue item brings the item back).
+  let moved = false;
+  if (S.clipStart != null && (S.draft.start_s < S.clipStart || S.draft.end_s > S.clipEnd)) {
+    S.clipStart = S.draft.start_s - S.cfg.pad_before_s;
+    S.clipEnd = S.draft.end_s + S.cfg.pad_after_s;
+    moved = true;
+  }
+  S.stoppedAtEnd = false;
   seek(S.draft.start_s);
   renderAll();
-  msg(`Editing ${ev.event_id}. Enter saves the change.`, "warn");
+  msg(`Editing ${ev.event_id}. Enter saves the change.` +
+      (moved ? " Clip moved to this event; click the queue item to go back." : ""), "warn");
 }
 
 async function save(next) {

@@ -10,7 +10,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from fastapi import Body, FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from deepfoul.io.fetch import read_fights
@@ -40,6 +40,15 @@ def create_app(cfg: dict, events_path: Path, mode: str, queue: list[dict] | None
         raise ValueError("an edit queue needs done_path")
     done_map = LocalMap(done_path) if edit else None
     app = FastAPI(title="DeepFoul labeling", docs_url=None, redoc_url=None)
+
+    @app.middleware("http")
+    async def no_stale_static(request, call_next):
+        # index.html is no-store; without this the browser can pair it with a cached older
+        # app.js (buttons on the page with no handler behind them)
+        resp = await call_next(request)
+        if request.url.path.startswith("/static/"):
+            resp.headers["Cache-Control"] = "no-store"
+        return resp
 
     def video_path(fid: str) -> Path:
         if fid not in fights:
@@ -94,8 +103,13 @@ def create_app(cfg: dict, events_path: Path, mode: str, queue: list[dict] | None
         return out
 
     @app.get("/")
-    def index() -> FileResponse:
-        return FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-store"})
+    def index() -> HTMLResponse:
+        # version-stamp app.js / app.css so a copy cached before an update is never reused
+        html = (STATIC / "index.html").read_text(encoding="utf-8")
+        for name in ("app.js", "app.css"):
+            v = int((STATIC / name).stat().st_mtime)
+            html = html.replace(f"/static/{name}\"", f"/static/{name}?v={v}\"")
+        return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 
     @app.get("/api/session")
     def session() -> dict:

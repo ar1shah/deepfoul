@@ -3,7 +3,6 @@ ev_00001,ufc326_garbrandt_long,163.5,164.5,clean,none,no,no,live,mined,
 ev_00002,ufc326_garbrandt_long,283,284,clean,none,no,no,live,mined,
 ev_00003,ufc326_garbrandt_long,338.75,339.75,clean,none,no,no,live,mined,round break
 ev_00004,ufc326_garbrandt_long,364,365,clean,none,no,no,live,mined,round break
-ev_00005,ufc326_garbrandt_long,387.5,388.5,clean,none,no,no,live,mined,round break
 ev_00006,ufc326_garbrandt_long,387.5,388.5,clean,none,no,no,live,mined,"round break, replay being shown"
 ev_00007,ufc326_garbrandt_long,536.75,537.75,clean,none,no,no,live,mined,slip
 ev_00008,ufc326_garbrandt_long,810,810.88,low_blow,blue,unsure,yes,live,mined,
@@ -66,7 +65,7 @@ ev_00064,ufc276_munhoz_omalley,164,165,clean,none,no,no,live,mined,
 ev_00065,ufc276_munhoz_omalley,199,200,clean,none,no,no,live,mined,
 ev_00066,ufc276_munhoz_omalley,225.18,226.22,hard_negative,none,yes,no,live,mined,clean inside kick
 ev_00067,ufc276_munhoz_omalley,267,268,clean,none,no,no,live,mined,
-ev_00068,ufc276_munhoz_omalley,322.75,323.75,clean,none,no,yes,live,mined,round break right after foul commited it seems
+ev_00068,ufc276_munhoz_omalley,316.62,317.5,low_blow,blue,yes,yes,live,mined,
 ev_00069,ufc276_munhoz_omalley,465.75,466.75,clean,none,no,no,live,mined,
 ev_00070,ufc276_munhoz_omalley,491.75,492.75,clean,none,no,no,live,mined,round break
 ev_00071,ufc276_munhoz_omalley,520,521,clean,none,no,no,live,mined,round break
@@ -93,7 +92,7 @@ ev_00091,ufcfn20210313_edwards_muhammad,281.5,282.5,clean,none,no,no,live,mined,
 ev_00092,ufcfn20210313_edwards_muhammad,297.5,298.5,clean,none,no,no,live,mined,
 ev_00093,ufcfn20210313_edwards_muhammad,318,319,clean,none,no,no,live,mined,
 ev_00094,ufcfn20210313_edwards_muhammad,337.5,338.5,clean,none,no,no,live,mined,
-ev_00095,ufcfn20210313_edwards_muhammad,378.25,379.25,clean,none,no,no,live,mined,"round break, break after foul called"
+ev_00095,ufcfn20210313_edwards_muhammad,373.87,374.93,eye_poke,red,yes,yes,live,mined,
 ev_00096,ufcfn20210313_edwards_muhammad,461.25,462.25,clean,none,no,no,live,mined,
 ev_00097,ufcfn20210313_edwards_muhammad,476,477,clean,none,no,no,live,mined,round break
 ev_00098,ufcfn20210313_edwards_muhammad,499.5,500.5,clean,none,no,no,live,mined,round break
@@ -147,7 +146,7 @@ ev_00145,ufc321_jandiroba_dern,1300,1301,clean,none,no,no,live,mined,
 ev_00146,ufc321_jandiroba_dern,1362.25,1363.25,clean,none,no,no,live,mined,
 ev_00147,ufc321_jandiroba_dern,1456.5,1457.5,clean,none,no,no,live,mined,
 ev_00148,ufc258_barber_grasso,164.25,165.25,clean,none,no,no,live,mined,
-ev_00149,ufc258_barber_grasso,168.24,168.77,open_hand,blue,no,no,live,mined,open glove in clinch not a foul
+ev_00149,ufc258_barber_grasso,168.24,168.77,hard_negative,blue,yes,no,live,mined,open glove in clinch not a foul
 ev_00150,ufc258_barber_grasso,186,187,clean,none,no,no,live,mined,
 ev_00151,ufc258_barber_grasso,260,261,clean,none,no,no,live,mined,
 ev_00152,ufc258_barber_grasso,270.75,271.75,clean,none,no,no,live,mined,
@@ -164,11 +163,11 @@ ev_00162,ufc258_barber_grasso,722.5,723.5,clean,none,no,no,live,mined,
 ev_00163,ufc258_barber_grasso,814.5,815.5,clean,none,no,no,live,mined,
 ev_00164,ufc258_barber_grasso,867.75,868.75,clean,none,no,no,live,mined,
 ev_00165,ufc258_barber_grasso,937.17,937.9,hard_negative,blue,yes,no,live,mined,clean knee
-ev_00166,ufc258_barber_grasso,962.76,962.76,clean,none,no,no,live,mined,
+ev_00166,ufc258_barber_grasso,958.25,959.25,clean,none,no,no,live,mined,
 ev_00167,ufc258_barber_grasso,980.25,981.25,clean,none,no,no,live,mined,
 ev_00168,ufc258_barber_grasso,1031.25,1032.25,clean,none,no,no,live,mined,
 ev_00169,ufc299_omalley_vera,75,76,clean,none,no,no,live,mined,
-ev_00170,ufc299_omalley_vera,85.15,88.45,open_hand,red,no,no,live,mined,multiple open hands extended
+ev_00170,ufc299_omalley_vera,84.72,84.98,open_hand,red,no,no,live,mined,
 ev_00171,ufc299_omalley_vera,329.25,330.25,clean,none,no,no,live,mined,
 ev_00172,ufc299_omalley_vera,420,421,clean,none,no,no,live,mined,
 ev_00173,ufc299_omalley_vera,499.13,501.63,open_hand,red,no,no,live,mined,multiple open hands extended
@@ -187,5 +186,5 @@ ev_00185,ufc299_omalley_vera,1321,1322,clean,none,no,no,live,mined,
 ev_00186,ufc299_omalley_vera,1382.25,1383.25,clean,none,no,no,live,mined,
 ev_00187,ufc299_omalley_vera,1419.5,1420.5,clean,none,no,no,live,mined,
 ev_00188,ufc299_omalley_vera,1544.75,1545.75,clean,none,no,no,live,mined,
-ev_00189,ufc299_omalley_vera,1544.75,1545.75,clean,none,no,no,live,mined,
-ev_00190,ufc299_omalley_vera,1544.75,1545.75,clean,none,no,no,live,mined,
+ev_00189,ufc299_omalley_vera,85.19,85.62,open_hand,red,no,no,live,mined,
+ev_00190,ufc299_omalley_vera,85.78,86.42,open_hand,red,no,no,live,mined,
