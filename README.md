@@ -8,8 +8,9 @@
 
 </div>
 
-<!-- TODO: record/capture this (a short render of the overlay with skeletons and corner tags, from `deepfoul render`) -->
 ![Demo](docs/demo.gif)
+
+*Eye poke by Battle on Loosa at 08:09.6, rendered at half speed from the keypoint cache: corner boxes, skeletons, and fingertip and eye highlights.*
 
 **Tech:** Python 3.11 · RTMW pose (rtmlib, ONNX Runtime) · ByteTrack · OpenCV · FastAPI · pandas / Parquet
 
@@ -59,8 +60,7 @@ DeepFoul is a system that tracks both fighters, reads their body pose frame by f
 
 ## Screenshots
 
-<!-- TODO: record/capture this (labeling app mid-label: video, timeline with the draft span, and the label panel; avoid committing a UFC frame, see CLAUDE.md data rules) -->
-**Labeling app:** one candidate moment with the clip timeline, the draft span and the keyboard-driven label panel.
+**Labeling app:** an eye poke from Battle vs Loosa loaded for editing, with the clip timeline, the labeled span and the keyboard-driven label panel.
 ![Labeling app](docs/screenshots/labeling_app.png)
 
 **Stoppage finder signals:** the seven signals over a whole fight (Battle vs Loosa), with the known eye poke in red and the top candidates as dashed green lines.
